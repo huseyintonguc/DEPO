@@ -23,11 +23,16 @@ file_id = "<Drive dosya ID veya link>"
 import io
 from io import BytesIO
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import re
 
 import pandas as pd
 import streamlit as st
+
+# Saat dilimi (secrets'tan ayarlanabilir)
+DEFAULT_TZ = "Europe/Istanbul"
+TZ = st.secrets.get("app", {}).get("timezone", DEFAULT_TZ)
 
 # Google Drive API
 from google.oauth2.service_account import Credentials
@@ -206,7 +211,7 @@ elif page == "Giriş/Çıkış":
                 if miktar > mevcut:
                     st.error(f"Yetersiz stok. Mevcut: {mevcut}")
                     st.stop()
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            now_str = datetime.now(ZoneInfo(TZ)).strftime("%Y-%m-%d %H:%M")
             yeni = {
                 "tarih": pd.to_datetime(tarih_val),
                 "kayit_zamani": now_str,
