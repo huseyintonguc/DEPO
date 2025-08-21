@@ -1,35 +1,28 @@
 """
-Depo Yönetimi v5 — Drive'daki XLSX ile Çalış (Ürünler + Günlük İşler)
--------------------------------------------------------------------
-İstekleriniz:
-- İşlemler **Drive'daki** Excel üzerinden yapsın (2 sayfa: `urunler`, `hareketler`).
-- Ürün bilgisi sadece **urun_kodu** ve **urun_adi**.
-- Formda **Giriş/Çıkış + miktar + birim + açıklama** (fiyat/tedarikçi YOK).
-- Her hareket kaydında **dakika hassasiyetinde** zaman damgası olsun (`kayit_zamani`: YYYY-MM-DD HH:MM).
-- Her kayıt **aynı anda Drive'daki aynı Excel** dosyasının `hareketler` sayfasına yazılsın.
+Depo Yönetimi v6 — Ürün Adına/Koduna Göre Arama + Rapor Tarih Filtresi
+---------------------------------------------------------------------
+- Giriş/Çıkış formunda **Ürün Ara** kutusu (ad veya kod ile filtreleyip seç)
+- Rapor sayfasında **Başlangıç / Bitiş** tarih filtresi + özet metrikler
+- Drive (Google Sheets/XLSX) ile iki yönlü: ürünler okunur, hareketler yazılır
 
-Kurulum:
+Gereken paketler:
     pip install streamlit pandas openpyxl google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib
 
 Çalıştırma:
-    streamlit run depo_app_v5.py
+    streamlit run depo_app_v6.py
 
-Ayarlar (.streamlit/secrets.toml):
+Secrets (.streamlit/secrets.toml):
 [gdrive]
-file_id = "YOUR_DRIVE_FILE_ID"  # Paylaşım linkinde /d/<ID>/ kısmı
+file_id = "<Drive dosya ID veya link>"
 
 [gdrive.service_account]
-# Google Cloud servis hesabı JSON alanları (Drive API yetkili olmalı)
+# Service account JSON alanlarınız (Drive API yetkili)
 # ...
-
-Notlar:
-- Hedef dosyanızın **XLSX** olmasını öneririz. Google Sheets linki verilirse okuma yapılır; yazarken dosya XLSX olarak güncellenebilir.
-- Dosyada sayfa adları tam olarak `urunler` ve `hareketler` olsun.
 """
 
 import io
 from io import BytesIO
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 import re
 
@@ -79,7 +72,6 @@ def download_drive_excel(file_id: str, out_path: Path) -> bool:
     service, err = _get_service()
     if err:
         st.error(err); return False
-    # MIME tipini kontrol et, GSheet ise XLSX export et
     meta = service.files().get(fileId=file_id, fields="id,name,mimeType").execute()
     mime = meta.get("mimeType", "")
     buf = BytesIO()
@@ -116,7 +108,6 @@ def load_book(xlsx_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     xls = pd.ExcelFile(xlsx_path)
     urunler = pd.read_excel(xls, SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=PRODUCT_COLUMNS)
     hareketler = pd.read_excel(xls, SHEET_MOVES) if SHEET_MOVES in xls.sheet_names else pd.DataFrame(columns=MOVE_COLUMNS)
-    # kolonları garanti et
     for c in PRODUCT_COLUMNS:
         if c not in urunler.columns:
             urunler[c] = pd.Series(dtype=object)
@@ -148,17 +139,18 @@ def hesapla_stok(moves: pd.DataFrame) -> pd.DataFrame:
 # UI
 # -------------------------------------------------
 
-st.set_page_config(page_title="Depo Yönetimi v5", page_icon="📦", layout="wide")
-st.title("📦 Depo Yönetimi v5 — Drive Üzerinden")
+st.set_page_config(page_title="Depo Yönetimi v6", page_icon="📦", layout="wide")
+st.title("📦 Depo Yönetimi v6 — Drive Üzerinden")
 
-FILE_ID = _extract_id(st.secrets.get("gdrive", {}).get("file_id", "").strip())
+FILE_ID_RAW = st.secrets.get("gdrive", {}).get("file_id", "").strip()
+FILE_ID = _extract_id(FILE_ID_RAW)
 if not FILE_ID:
-    st.error("Lütfen `.streamlit/secrets.toml` içine `[gdrive] file_id = ""` ekleyin (Drive dosya ID veya link).")
+    st.error("Lütfen .streamlit/secrets.toml içine [gdrive] file_id =  ekleyin (Drive dosya ID veya link).")
     st.stop()
 
 with st.sidebar:
     page = st.radio("Menü", ["Giriş/Çıkış", "Ürünler (Drive)", "Stok", "Rapor"], index=0)
-    st.caption("Tüm işlemler doğrudan Drive'daki Excel ile senkron çalışır.")
+    st.caption("Ürün arama ve rapor tarih filtresi eklendi.")
 
 # En güncel defteri indir
 if not download_drive_excel(FILE_ID, LOCAL_FILE):
@@ -175,15 +167,29 @@ if page == "Ürünler (Drive)":
 elif page == "Giriş/Çıkış":
     st.subheader("🔁 Giriş / Çıkış")
     if urunler_df.empty:
-        st.warning("Drive Excel'de ürün bulunamadı. `urunler` sayfasında `urun_kodu` ve `urun_adi` kolonları olduğundan emin olun.")
+        st.warning("Drive Excel'de ürün bulunamadı. 'urunler' sayfasında 'urun_kodu' ve 'urun_adi' kolonları olduğundan emin olun.")
     else:
-        code2name = dict(zip(urunler_df["urun_kodu"].astype(str), urunler_df["urun_adi"].astype(str)))
+        # Ürün arama filtresi (ad/kod)
+        search = st.text_input("🔎 Ürün Ara (Ad veya Kod)", placeholder="ör. vida, 1002, filtre...")
+        fdf = urunler_df.copy()
+        if search:
+            s = search.strip().lower()
+            fdf = fdf[fdf.apply(lambda r: s in str(r["urun_kodu"]).lower() or s in str(r["urun_adi"]).lower(), axis=1)]
+            if fdf.empty:
+                st.info("Aramanızla eşleşen ürün yok, tüm ürünler listelendi.")
+                fdf = urunler_df
+        # Seçim etiketlerini "kod — ad" yap
+        fdf = fdf.assign(label=fdf["urun_kodu"].astype(str) + " — " + fdf["urun_adi"].astype(str))
+        code_from_label = dict(zip(fdf["label"], fdf["urun_kodu"].astype(str)))
+        name_from_code = dict(zip(urunler_df["urun_kodu"].astype(str), urunler_df["urun_adi"].astype(str)))
+
         with st.form("move_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             with c1:
                 islem = st.selectbox("İşlem Türü", ["Giriş", "Çıkış"], index=0)
-                urun_kodu = st.selectbox("Ürün Kodu", options=urunler_df["urun_kodu"].astype(str).tolist())
-                urun_adi = code2name.get(urun_kodu, "")
+                sel = st.selectbox("Ürün", options=fdf["label"].tolist())
+                urun_kodu = code_from_label.get(sel, "")
+                urun_adi = name_from_code.get(urun_kodu, "")
                 st.text_input("Ürün Adı", value=urun_adi, disabled=True)
                 miktar = st.number_input("Miktar *", min_value=0.0, step=1.0)
                 birim = st.selectbox("Birim", ["Adet", "Kutu", "Kg", "Metre", "Litre", "Paket"], index=0)
@@ -192,8 +198,8 @@ elif page == "Giriş/Çıkış":
                 tarih_val = st.date_input("Tarih", value=date.today(), format="DD.MM.YYYY")
                 st.caption("Kaydet dediğiniz anda dakika zaman damgası eklenip Drive'a yazılır.")
             submitted = st.form_submit_button("Kaydet ve Drive'a Yaz")
+
         if submitted:
-            # çıkışta stok kontrolü
             stok = hesapla_stok(hareket_df)
             mevcut_map = dict(zip(stok["urun_kodu"].astype(str), stok["stok_miktar"].astype(float)))
             if islem == "Çıkış":
@@ -207,19 +213,19 @@ elif page == "Giriş/Çıkış":
                 "kayit_zamani": now_str,
                 "islem_turu": islem,
                 "urun_kodu": urun_kodu,
-                "urun_adi": code2name.get(urun_kodu, ""),
+                "urun_adi": urun_adi,
                 "miktar": float(miktar),
                 "birim": birim,
                 "aciklama": aciklama.strip(),
             }
             hareket_df = pd.concat([hareket_df, pd.DataFrame([yeni])], ignore_index=True)
-            # Yerelde güncelle ve Drive'a yaz
             save_book(LOCAL_FILE, urunler_df, hareket_df)
             ok = upload_drive_excel(FILE_ID, LOCAL_FILE)
             if ok:
                 st.success("Kayıt eklendi ve Drive Excel güncellendi. ⛅")
             else:
                 st.warning("Drive güncellenemedi, daha sonra tekrar deneyin.")
+
     st.divider()
     st.subheader("Son Hareketler")
     st.dataframe(hareket_df.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
@@ -229,7 +235,6 @@ elif page == "Stok":
     st.subheader("📊 Net Stok (Giriş − Çıkış)")
     stok_df = hesapla_stok(hareket_df)
     if stok_df.empty:
-        # ürünleri 0 stokla göster
         z = urunler_df.copy(); z["stok_miktar"] = 0.0; z["birim"] = "Adet"
         goster = z[["urun_kodu", "urun_adi", "stok_miktar", "birim"]]
     else:
@@ -240,7 +245,30 @@ elif page == "Stok":
 
 # ---------------- Rapor ----------------
 elif page == "Rapor":
-    st.subheader("📅 Hareketler")
-    st.dataframe(hareket_df.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
-    buf = io.BytesIO(); hareket_df.to_excel(buf, index=False)
-    st.download_button("Hareketler Excel İndir", data=buf.getvalue(), file_name="hareketler.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.subheader("📅 Rapor")
+    df = hareket_df.copy()
+    if not df.empty:
+        df["tarih_only"] = pd.to_datetime(df["tarih"], errors="coerce").dt.date
+        today = date.today()
+        vars_start = (df["tarih_only"].min() or today.replace(day=1))
+        c1, c2 = st.columns(2)
+        with c1:
+            start = st.date_input("Başlangıç", value=vars_start)
+        with c2:
+            end = st.date_input("Bitiş", value=today)
+        mask = (df["tarih_only"] >= start) & (df["tarih_only"] <= end)
+        rapor = df.loc[mask].drop(columns=["tarih_only"]) if "tarih_only" in df else df.loc[mask]
+        st.write(f"Seçili aralıkta {len(rapor)} hareket")
+        st.dataframe(rapor.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
+        # Kısa özet
+        giris_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Giriş", "miktar"], errors="coerce").sum()
+        cikis_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Çıkış", "miktar"], errors="coerce").sum()
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Toplam Giriş", f"{giris_top}")
+        m2.metric("Toplam Çıkış", f"{cikis_top}")
+        m3.metric("Net", f"{giris_top - cikis_top}")
+        # İndir
+        buf = io.BytesIO(); rapor.to_excel(buf, index=False)
+        st.download_button("Raporu Excel İndir", data=buf.getvalue(), file_name="depo_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.caption("Hareket kaydı yok.")
