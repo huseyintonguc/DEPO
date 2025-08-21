@@ -190,7 +190,6 @@ elif page == "Giriş/Çıkış":
                 sel = st.selectbox("Ürün", options=fdf["label"].tolist())
                 urun_kodu = code_from_label.get(sel, "")
                 urun_adi = name_from_code.get(urun_kodu, "")
-                st.text_input("Ürün Adı", value=urun_adi, disabled=True)
                 miktar = st.number_input("Miktar *", min_value=0.0, step=1.0)
                 birim = st.selectbox("Birim", ["Adet", "Kutu", "Kg", "Metre", "Litre", "Paket"], index=0)
             with c2:
@@ -248,6 +247,7 @@ elif page == "Rapor":
     st.subheader("📅 Rapor")
     df = hareket_df.copy()
     if not df.empty:
+        # Tarih filtreleri
         df["tarih_only"] = pd.to_datetime(df["tarih"], errors="coerce").dt.date
         today = date.today()
         vars_start = (df["tarih_only"].min() or today.replace(day=1))
@@ -256,17 +256,34 @@ elif page == "Rapor":
             start = st.date_input("Başlangıç", value=vars_start)
         with c2:
             end = st.date_input("Bitiş", value=today)
+
+        # Ürün filtresi (opsiyonel): "Tümü" + "kod — ad"
+        prod_labels = (urunler_df.assign(label=urunler_df["urun_kodu"].astype(str) + " — " + urunler_df["urun_adi"].astype(str))
+                                   if not urunler_df.empty else
+                                   df.assign(label=df["urun_kodu"].astype(str) + " — " + df["urun_adi"].astype(str)))
+        label_to_code = dict(zip(prod_labels["label"], prod_labels["urun_kodu"].astype(str)))
+        options = ["Tümü"] + list(prod_labels["label"].unique())
+        selected_label = st.selectbox("Ürün (opsiyonel)", options)
+        selected_code = label_to_code.get(selected_label, None)
+
+        # Filtre uygula
         mask = (df["tarih_only"] >= start) & (df["tarih_only"] <= end)
+        if selected_code:
+            mask = mask & (df["urun_kodu"].astype(str) == str(selected_code))
         rapor = df.loc[mask].drop(columns=["tarih_only"]) if "tarih_only" in df else df.loc[mask]
+
+        # Sonuçlar
         st.write(f"Seçili aralıkta {len(rapor)} hareket")
         st.dataframe(rapor.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
-        # Kısa özet
+
+        # Özet metrikler (seçime göre)
         giris_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Giriş", "miktar"], errors="coerce").sum()
         cikis_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Çıkış", "miktar"], errors="coerce").sum()
         m1, m2, m3 = st.columns(3)
         m1.metric("Toplam Giriş", f"{giris_top}")
         m2.metric("Toplam Çıkış", f"{cikis_top}")
         m3.metric("Net", f"{giris_top - cikis_top}")
+
         # İndir
         buf = io.BytesIO(); rapor.to_excel(buf, index=False)
         st.download_button("Raporu Excel İndir", data=buf.getvalue(), file_name="depo_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
