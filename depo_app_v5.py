@@ -77,22 +77,28 @@ def download_drive_excel(file_id: str, out_path: Path) -> bool:
     service, err = _get_service()
     if err:
         st.error(err); return False
-    meta = service.files().get(fileId=file_id, fields="id,name,mimeType").execute()
-    mime = meta.get("mimeType", "")
-    buf = BytesIO()
-    if mime == "application/vnd.google-apps.spreadsheet":
-        req = service.files().export(fileId=file_id, mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        buf.write(req.execute()); buf.seek(0)
-    else:
-        req = service.files().get_media(fileId=file_id)
-        downloader = MediaIoBaseDownload(buf, req)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        buf.seek(0)
-    with open(out_path, "wb") as f:
-        f.write(buf.read())
-    return True
+    try:
+        meta = service.files().get(fileId=file_id, fields="id,name,mimeType,permissions,owners(emailAddress)" ).execute()
+        mime = meta.get("mimeType", "")
+        st.caption(f"[DEBUG] Drive dosyası: {meta.get('name','?')} — mimeType={mime}")
+        buf = BytesIO()
+        if mime == "application/vnd.google-apps.spreadsheet":
+            # Google Sheet → XLSX export
+            req = service.files().export(fileId=file_id, mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            buf.write(req.execute()); buf.seek(0)
+        else:
+            # XLSX gibi normal dosyayı indir
+            req = service.files().get_media(fileId=file_id)
+            downloader = MediaIoBaseDownload(buf, req)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+            buf.seek(0)
+        with open(out_path, "wb") as f:
+            f.write(buf.read())
+        return True
+    except Exception as e:
+        st.error("Drive'dan indirme/okuma başarısız. Olası nedenl
 
 
 def upload_drive_excel(file_id: str, src_path: Path) -> bool:
@@ -154,7 +160,7 @@ if not FILE_ID:
     st.stop()
 
 with st.sidebar:
-    page = st.radio("Menü", ["Giriş/Çıkış", "Ürünler (Drive)", "Stok", "Rapor"], index=0)
+    page = st.radio("Menü", ["Giriş/Çıkış", "Ürünler (Drive)", "Rapor"], index=0)
     st.caption("Ürün arama ve rapor tarih filtresi eklendi.")
 
 # En güncel defteri indir
@@ -233,19 +239,6 @@ elif page == "Giriş/Çıkış":
     st.divider()
     st.subheader("Son Hareketler")
     st.dataframe(hareket_df.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
-
-# ---------------- Stok ----------------
-elif page == "Stok":
-    st.subheader("📊 Net Stok (Giriş − Çıkış)")
-    stok_df = hesapla_stok(hareket_df)
-    if stok_df.empty:
-        z = urunler_df.copy(); z["stok_miktar"] = 0.0; z["birim"] = "Adet"
-        goster = z[["urun_kodu", "urun_adi", "stok_miktar", "birim"]]
-    else:
-        goster = stok_df
-    st.dataframe(goster, use_container_width=True, hide_index=True)
-    b = io.BytesIO(); goster.to_excel(b, index=False)
-    st.download_button("Stok Excel İndir", data=b.getvalue(), file_name="stok_listesi.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ---------------- Rapor ----------------
 elif page == "Rapor":
