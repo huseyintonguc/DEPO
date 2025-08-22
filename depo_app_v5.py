@@ -98,7 +98,7 @@ def download_drive_excel(file_id: str, out_path: Path) -> bool:
             f.write(buf.read())
         return True
     except Exception as e:
-        st.error("Drive'dan indirme/okuma başarısız. Olası nedenl
+        st.error("Drive'dan indirme/okuma başarısız. Olası nedenler: Dosya ID yanlış, yetki eksik veya internet bağlantısı hatalı olabilir.")
 
 
 def upload_drive_excel(file_id: str, src_path: Path) -> bool:
@@ -287,3 +287,4 @@ elif page == "Rapor":
         st.download_button("Raporu Excel İndir", data=buf.getvalue(), file_name="depo_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.caption("Hareket kaydı yok.")
+
