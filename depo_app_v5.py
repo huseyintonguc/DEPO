@@ -258,14 +258,90 @@ elif page == "Giriş/Çıkış":
 elif page == "Rapor":
     st.subheader("📅 Rapor")
     df = hareket_df.copy()
-    if not df.empty:
-        # Tarih alanını normalize et
-        df["tarih_only"] = pd.to_datetime(df["tarih"], errors="coerce").dt.date
-        today = date.today()
+    try:
+        if not df.empty:
+            # --- Tarih kolonunu sağlamlaştır ---
+            if "tarih" not in df.columns:
+                st.warning("Veride 'tarih' kolonu yok. Lütfen Drive'daki 'hareketler' sayfasında kolon adlarını kontrol edin.")
+                st.stop()
+            # string/datetime fark etmez, güne indir
+            df["tarih_only"] = pd.to_datetime(df["tarih"], errors="coerce").dt.date
+            # tamamen NaT olduysa uyarı ver
+            if df["tarih_only"].isna().all():
+                st.warning("Tarih bilgileri okunamadı. Lütfen 'hareketler' sayfasında 'tarih' hücrelerinin tarih formatında olduğundan emin olun.")
+                st.stop()
 
-        # Hızlı tarih aralıkları
-        rng = st.radio("Hızlı Aralık", ["Bugün", "Bu Hafta", "Bu Ay", "Özel"], horizontal=True)
-        if rng == "Bugün":
-            start, end = today, today
-        elif rng == "Bu Hafta":
-            start = today - timedelta(days=today.weekday())
+            today = date.today()
+
+            # Hızlı aralıklar
+            rng = st.radio("Hızlı Aralık", ["Bugün", "Bu Hafta", "Bu Ay", "Özel"], horizontal=True)
+            if rng == "Bugün":
+                start, end = today, today
+            elif rng == "Bu Hafta":
+                start = today - timedelta(days=today.weekday())
+                end = today
+            elif rng == "Bu Ay":
+                start = today.replace(day=1)
+                end = today
+            else:
+                c1, c2 = st.columns(2)
+                with c1:
+                    start = st.date_input("Başlangıç", value=today)
+                with c2:
+                    end = st.date_input("Bitiş", value=today)
+
+            # Ürün çoklu seçim (opsiyonel)
+            prod_labels = (
+                urunler_df.assign(label=urunler_df["urun_kodu"].astype(str) + " — " + urunler_df["urun_adi"].astype(str))
+                if not urunler_df.empty else
+                df.assign(label=df["urun_kodu"].astype(str) + " — " + df["urun_adi"].astype(str))
+            )
+            label_to_code = dict(zip(prod_labels["label"], prod_labels["urun_kodu"].astype(str)))
+            labels = list(prod_labels["label"].unique())
+            sel_labels = st.multiselect("Ürün(ler) — boş bırak = tümü", labels, default=[])
+            sel_codes = [label_to_code[l] for l in sel_labels] if sel_labels else []
+
+            # Filtre uygula
+            mask = (df["tarih_only"] >= start) & (df["tarih_only"] <= end)
+            if sel_codes:
+                mask &= df["urun_kodu"].astype(str).isin([str(x) for x in sel_codes])
+            rapor = df.loc[mask].drop(columns=["tarih_only"]) if "tarih_only" in df else df.loc[mask]
+
+            # Sonuçlar (boşsa da net göster)
+            st.write(f"Seçili aralıkta {len(rapor)} hareket")
+            if rapor.empty:
+                st.info("Bu aralık/ürün filtresinde kayıt bulunamadı.")
+            st.dataframe(rapor.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
+
+            # Özet metrikler
+            if rapor.empty:
+                giris_top = 0; cikis_top = 0
+            else:
+                giris_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Giriş", "miktar"], errors="coerce").sum()
+                cikis_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Çıkış", "miktar"], errors="coerce").sum()
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Toplam Giriş", f"{giris_top}")
+            m2.metric("Toplam Çıkış", f"{cikis_top}")
+            m3.metric("Net", f"{giris_top - cikis_top}")
+
+            # Ürün bazlı özet (boşsa boş tablo)
+            t = rapor.copy()
+            if not t.empty:
+                t["miktar"] = pd.to_numeric(t["miktar"], errors="coerce").fillna(0)
+                t["giris"] = t.apply(lambda r: r["miktar"] if r["islem_turu"]=="Giriş" else 0, axis=1)
+                t["cikis"] = t.apply(lambda r: r["miktar"] if r["islem_turu"]=="Çıkış" else 0, axis=1)
+                pvt = t.groupby(["urun_kodu","urun_adi","birim"], as_index=False).agg({"giris":"sum","cikis":"sum"})
+                pvt["net"] = pvt["giris"] - pvt["cikis"]
+            else:
+                pvt = pd.DataFrame(columns=["urun_kodu","urun_adi","birim","giris","cikis","net"])
+            st.markdown("**Ürün Bazlı Özet**")
+            st.dataframe(pvt, use_container_width=True, hide_index=True)
+
+            # İndir
+            buf = io.BytesIO(); rapor.to_excel(buf, index=False)
+            st.download_button("Raporu Excel İndir", data=buf.getvalue(), file_name="depo_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        else:
+            st.caption("Hareket kaydı yok.")
+    except Exception as e:
+        st.error("Rapor oluştururken bir hata oluştu: " + str(e))
+        st.stop()
