@@ -33,6 +33,13 @@ import streamlit as st
 with st.sidebar:
     st.image("Artboard 3.png", width=220)
     st.markdown("### Depo Yönetimi")
+    # --- Üst Başlık Logo + Başlık ---
+col1, col2 = st.columns([1,4])
+with col1:
+    st.image("Artboard 3.png", width=100)
+with col2:
+    st.markdown("## 📦 Depo Yönetimi v6 — Drive Üzerinden")
+
 # Saat dilimi (secrets'tan ayarlanabilir)
 DEFAULT_TZ = "Europe/Istanbul"
 TZ = st.secrets.get("app", {}).get("timezone", DEFAULT_TZ)
@@ -348,6 +355,7 @@ elif page == "Rapor":
     except Exception as e:
         st.error("Rapor oluştururken bir hata oluştu: " + str(e))
         st.stop()
+
 
 
 
