@@ -98,7 +98,8 @@ def download_drive_excel(file_id: str, out_path: Path) -> bool:
             f.write(buf.read())
         return True
     except Exception as e:
-        st.error("Drive'dan indirme/okuma başarısız. Olası nedenler: Dosya ID yanlış, yetki eksik veya internet bağlantısı hatalı olabilir.")
+        st.error("Drive'dan indirme/okuma başarısız. Olası nedenler: (1) Servis hesabına düzenleyici yetki verilmedi, (2) file_id hatalı, (3) Drive API etkin değil. Ayrıntı: " + str(e))
+        return False
 
 
 def upload_drive_excel(file_id: str, src_path: Path) -> bool:
@@ -236,6 +237,19 @@ elif page == "Giriş/Çıkış":
             else:
                 st.warning("Drive güncellenemedi, daha sonra tekrar deneyin.")
 
+    # Geri al (Undo) — son eklenen kaydı sil ve Drive'a geri yaz
+    if st.button("🔙 Son Kaydı Geri Al"):
+        if not hareket_df.empty:
+            hareket_df = hareket_df.iloc[:-1].copy()
+            save_book(LOCAL_FILE, urunler_df, hareket_df)
+            ok2 = upload_drive_excel(FILE_ID, LOCAL_FILE)
+            if ok2:
+                st.success("Son kayıt geri alındı ve Drive güncellendi.")
+            else:
+                st.warning("Yerelde geri alındı, Drive güncellenemedi. Daha sonra tekrar deneyin.")
+        else:
+            st.info("Geri alınacak kayıt yok.")
+
     st.divider()
     st.subheader("Son Hareketler")
     st.dataframe(hareket_df.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
@@ -245,46 +259,13 @@ elif page == "Rapor":
     st.subheader("📅 Rapor")
     df = hareket_df.copy()
     if not df.empty:
-        # Tarih filtreleri
+        # Tarih alanını normalize et
         df["tarih_only"] = pd.to_datetime(df["tarih"], errors="coerce").dt.date
         today = date.today()
-        vars_start = (df["tarih_only"].min() or today.replace(day=1))
-        c1, c2 = st.columns(2)
-        with c1:
-            start = st.date_input("Başlangıç", value=vars_start)
-        with c2:
-            end = st.date_input("Bitiş", value=today)
 
-        # Ürün filtresi (opsiyonel): "Tümü" + "kod — ad"
-        prod_labels = (urunler_df.assign(label=urunler_df["urun_kodu"].astype(str) + " — " + urunler_df["urun_adi"].astype(str))
-                                   if not urunler_df.empty else
-                                   df.assign(label=df["urun_kodu"].astype(str) + " — " + df["urun_adi"].astype(str)))
-        label_to_code = dict(zip(prod_labels["label"], prod_labels["urun_kodu"].astype(str)))
-        options = ["Tümü"] + list(prod_labels["label"].unique())
-        selected_label = st.selectbox("Ürün (opsiyonel)", options)
-        selected_code = label_to_code.get(selected_label, None)
-
-        # Filtre uygula
-        mask = (df["tarih_only"] >= start) & (df["tarih_only"] <= end)
-        if selected_code:
-            mask = mask & (df["urun_kodu"].astype(str) == str(selected_code))
-        rapor = df.loc[mask].drop(columns=["tarih_only"]) if "tarih_only" in df else df.loc[mask]
-
-        # Sonuçlar
-        st.write(f"Seçili aralıkta {len(rapor)} hareket")
-        st.dataframe(rapor.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
-
-        # Özet metrikler (seçime göre)
-        giris_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Giriş", "miktar"], errors="coerce").sum()
-        cikis_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Çıkış", "miktar"], errors="coerce").sum()
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Toplam Giriş", f"{giris_top}")
-        m2.metric("Toplam Çıkış", f"{cikis_top}")
-        m3.metric("Net", f"{giris_top - cikis_top}")
-
-        # İndir
-        buf = io.BytesIO(); rapor.to_excel(buf, index=False)
-        st.download_button("Raporu Excel İndir", data=buf.getvalue(), file_name="depo_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.caption("Hareket kaydı yok.")
-
+        # Hızlı tarih aralıkları
+        rng = st.radio("Hızlı Aralık", ["Bugün", "Bu Hafta", "Bu Ay", "Özel"], horizontal=True)
+        if rng == "Bugün":
+            start, end = today, today
+        elif rng == "Bu Hafta":
+            start = today - timedelta(days=today.weekday())
