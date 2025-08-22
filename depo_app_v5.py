@@ -31,7 +31,7 @@ import pandas as pd
 import streamlit as st
 # --- Yan Menü Logo ---
 with st.sidebar:
-    st.image("Artboard 3.png", width=120)
+    st.image("Artboard 3.png", width=140)
     st.markdown("### Depo Yönetimi")
 # Saat dilimi (secrets'tan ayarlanabilir)
 DEFAULT_TZ = "Europe/Istanbul"
@@ -348,4 +348,5 @@ elif page == "Rapor":
     except Exception as e:
         st.error("Rapor oluştururken bir hata oluştu: " + str(e))
         st.stop()
+
 
