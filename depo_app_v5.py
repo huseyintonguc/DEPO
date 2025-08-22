@@ -80,7 +80,10 @@ def download_drive_excel(file_id: str, out_path: Path) -> bool:
     try:
         meta = service.files().get(fileId=file_id, fields="id,name,mimeType,permissions,owners(emailAddress)" ).execute()
         mime = meta.get("mimeType", "")
-        st.caption(f"[DEBUG] Drive dosyası: {meta.get('name','?')} — mimeType={mime}")
+        
+        if st.secrets.get("app", {}).get("debug", False):
+            st.caption(f"[DEBUG] Drive dosyası: {meta.get('name','?')} — mimeType={mime}")
+        
         buf = BytesIO()
         if mime == "application/vnd.google-apps.spreadsheet":
             # Google Sheet → XLSX export
@@ -152,7 +155,25 @@ def hesapla_stok(moves: pd.DataFrame) -> pd.DataFrame:
 # -------------------------------------------------
 
 st.set_page_config(page_title="Depo Yönetimi v6", page_icon="📦", layout="wide")
+
+# ---- Basit tema iyileştirmeleri (yalın kart stili) ----
+st.markdown(
+    """
+    <style>
+      .app-subtitle { color:#a3a8b8; font-size:0.95rem; margin-top:-12px; margin-bottom:12px; }
+      .card { border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:16px 18px; margin:8px 0 18px 0; background:rgba(255,255,255,0.02); }
+      .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:rgba(125, 211, 252, 0.15); color:#7dd3fc; font-size:0.8rem; margin-right:6px; }
+      .muted { color:#9aa1b5; font-size:0.85rem; }
+      .section-title { font-weight:600; font-size:1.05rem; margin-bottom:8px; }
+      .danger { background:rgba(239,68,68,.12); color:#fecaca; }
+      .success { background:rgba(34,197,94,.12); color:#bbf7d0; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("📦 Depo Yönetimi v6 — Drive Üzerinden")
+st.markdown('<div class="app-subtitle">Drive ile senkron çalışan depo hareketleri · arama · rapor</div>', unsafe_allow_html=True)
 
 FILE_ID_RAW = st.secrets.get("gdrive", {}).get("file_id", "").strip()
 FILE_ID = _extract_id(FILE_ID_RAW)
@@ -172,12 +193,13 @@ urunler_df, hareket_df = load_book(LOCAL_FILE)
 
 # ---------------- Ürünler ----------------
 if page == "Ürünler (Drive)":
-    st.subheader("🧾 Ürünler (Drive)")
+    st.markdown('<div class="section-title">🧾 Ürünler (Drive)</div>', unsafe_allow_html=True)
     st.dataframe(urunler_df, use_container_width=True, hide_index=True)
 
 # ---------------- Giriş/Çıkış ----------------
 elif page == "Giriş/Çıkış":
-    st.subheader("🔁 Giriş / Çıkış")
+    st.markdown('<div class="section-title">🔁 Giriş / Çıkış</div>', unsafe_allow_html=True)
+st.markdown('<div class="muted">Ürün seç, miktarı gir ve kaydet. Kayıtlar anında Drive\'a yazılır.</div>', unsafe_allow_html=True)
     if urunler_df.empty:
         st.warning("Drive Excel'de ürün bulunamadı. 'urunler' sayfasında 'urun_kodu' ve 'urun_adi' kolonları olduğundan emin olun.")
     else:
@@ -251,12 +273,12 @@ elif page == "Giriş/Çıkış":
             st.info("Geri alınacak kayıt yok.")
 
     st.divider()
-    st.subheader("Son Hareketler")
+    st.markdown('<div class="section-title">🕒 Son Hareketler</div>', unsafe_allow_html=True)
     st.dataframe(hareket_df.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
 
 # ---------------- Rapor ----------------
 elif page == "Rapor":
-    st.subheader("📅 Rapor")
+    st.markdown('<div class="section-title">📅 Rapor</div>', unsafe_allow_html=True)
     df = hareket_df.copy()
     try:
         if not df.empty:
@@ -308,7 +330,7 @@ elif page == "Rapor":
             rapor = df.loc[mask].drop(columns=["tarih_only"]) if "tarih_only" in df else df.loc[mask]
 
             # Sonuçlar (boşsa da net göster)
-            st.write(f"Seçili aralıkta {len(rapor)} hareket")
+            st.markdown(f'<span class="pill">Kayıt: {len(rapor)}</span>', unsafe_allow_html=True)
             if rapor.empty:
                 st.info("Bu aralık/ürün filtresinde kayıt bulunamadı.")
             st.dataframe(rapor.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
@@ -320,9 +342,12 @@ elif page == "Rapor":
                 giris_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Giriş", "miktar"], errors="coerce").sum()
                 cikis_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Çıkış", "miktar"], errors="coerce").sum()
             m1, m2, m3 = st.columns(3)
-            m1.metric("Toplam Giriş", f"{giris_top}")
-            m2.metric("Toplam Çıkış", f"{cikis_top}")
-            m3.metric("Net", f"{giris_top - cikis_top}")
+with m1:
+    st.markdown('<div class="card success"><b>Toplam Giriş</b><br>'+str(giris_top)+'</div>', unsafe_allow_html=True)
+with m2:
+    st.markdown('<div class="card danger"><b>Toplam Çıkış</b><br>'+str(cikis_top)+'</div>', unsafe_allow_html=True)
+with m3:
+    st.markdown('<div class="card"><b>Net</b><br>'+str(giris_top - cikis_top)+'</div>', unsafe_allow_html=True)
 
             # Ürün bazlı özet (boşsa boş tablo)
             t = rapor.copy()
