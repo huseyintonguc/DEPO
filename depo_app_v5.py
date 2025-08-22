@@ -1,372 +1,100 @@
-"""
-Depo Yönetimi v6 — Ürün Adına/Koduna Göre Arama + Rapor Tarih Filtresi
----------------------------------------------------------------------
-- Giriş/Çıkış formunda **Ürün Ara** kutusu (ad veya kod ile filtreleyip seç)
-- Rapor sayfasında **Başlangıç / Bitiş** tarih filtresi + özet metrikler
-- Drive (Google Sheets/XLSX) ile iki yönlü: ürünler okunur, hareketler yazılır
-
-Gereken paketler:
-    pip install streamlit pandas openpyxl google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib
-
-Çalıştırma:
-    streamlit run depo_app_v6.py
-
-Secrets (.streamlit/secrets.toml):
-[gdrive]
-file_id = "<Drive dosya ID veya link>"
-
-[gdrive.service_account]
-# Service account JSON alanlarınız (Drive API yetkili)
-# ...
-"""
-
-import io
-from io import BytesIO
-from datetime import datetime, date, timedelta
-from zoneinfo import ZoneInfo
-from pathlib import Path
-import re
-
-import pandas as pd
 import streamlit as st
-
-# Saat dilimi (secrets'tan ayarlanabilir)
-DEFAULT_TZ = "Europe/Istanbul"
-TZ = st.secrets.get("app", {}).get("timezone", DEFAULT_TZ)
-
-# Google Drive API
+import pandas as pd
+import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from datetime import datetime
 
-# -------------------------------------------------
-# Sabitler
-# -------------------------------------------------
-DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
-LOCAL_FILE = DATA_DIR / "depo_drive_cache.xlsx"  # geçici yerel kopya
-SHEET_PRODUCTS = "urunler"
-SHEET_MOVES = "hareketler"
+# --- Google Sheets Bağlantısı ---
+scope = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
+credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+client = gspread.authorize(credentials)
 
-PRODUCT_COLUMNS = ["urun_kodu", "urun_adi"]
-MOVE_COLUMNS = ["tarih", "kayit_zamani", "islem_turu", "urun_kodu", "urun_adi", "miktar", "birim", "aciklama"]
+# Google Sheets
+SPREADSHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
+sh = client.open_by_url(SPREADSHEET_URL)
+worksheet_products = sh.worksheet("Ürünler")
+worksheet_logs = sh.worksheet("Günlük İşlemler")
 
-# -------------------------------------------------
-# Drive yardımcıları
-# -------------------------------------------------
-
-def _get_service():
-    if "gdrive" not in st.secrets or "service_account" not in st.secrets["gdrive"]:
-        return None, "Google Drive servis hesabı (gdrive.service_account) eksik."
-    sa_info = dict(st.secrets["gdrive"]["service_account"])
-    creds = Credentials.from_service_account_info(sa_info, scopes=[
-        "https://www.googleapis.com/auth/drive.file",
-        "https://www.googleapis.com/auth/drive.metadata.readonly",
-        "https://www.googleapis.com/auth/drive",
-    ])
-    service = build("drive", "v3", credentials=creds)
-    return service, None
-
-
-def _extract_id(s: str) -> str:
-    s = (s or "").strip()
-    m = re.search(r"/d/([a-zA-Z0-9_-]+)", s) or re.search(r"id=([a-zA-Z0-9_-]+)", s)
-    return m.group(1) if m else s
-
-
-def download_drive_excel(file_id: str, out_path: Path) -> bool:
-    service, err = _get_service()
-    if err:
-        st.error(err); return False
-    try:
-        meta = service.files().get(fileId=file_id, fields="id,name,mimeType,permissions,owners(emailAddress)" ).execute()
-        mime = meta.get("mimeType", "")
-        
-        if st.secrets.get("app", {}).get("debug", False):
-            st.caption(f"[DEBUG] Drive dosyası: {meta.get('name','?')} — mimeType={mime}")
-        
-        buf = BytesIO()
-        if mime == "application/vnd.google-apps.spreadsheet":
-            # Google Sheet → XLSX export
-            req = service.files().export(fileId=file_id, mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            buf.write(req.execute()); buf.seek(0)
-        else:
-            # XLSX gibi normal dosyayı indir
-            req = service.files().get_media(fileId=file_id)
-            downloader = MediaIoBaseDownload(buf, req)
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-            buf.seek(0)
-        with open(out_path, "wb") as f:
-            f.write(buf.read())
-        return True
-    except Exception as e:
-        st.error("Drive'dan indirme/okuma başarısız. Olası nedenler: (1) Servis hesabına düzenleyici yetki verilmedi, (2) file_id hatalı, (3) Drive API etkin değil. Ayrıntı: " + str(e))
-        return False
-
-
-def upload_drive_excel(file_id: str, src_path: Path) -> bool:
-    service, err = _get_service()
-    if err:
-        st.error(err); return False
-    media = MediaFileUpload(str(src_path), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=True)
-    service.files().update(fileId=file_id, media_body=media).execute()
-    return True
-
-# -------------------------------------------------
-# Excel yardımcıları
-# -------------------------------------------------
-
-def load_book(xlsx_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if not xlsx_path.exists():
-        return pd.DataFrame(columns=PRODUCT_COLUMNS), pd.DataFrame(columns=MOVE_COLUMNS)
-    xls = pd.ExcelFile(xlsx_path)
-    urunler = pd.read_excel(xls, SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=PRODUCT_COLUMNS)
-    hareketler = pd.read_excel(xls, SHEET_MOVES) if SHEET_MOVES in xls.sheet_names else pd.DataFrame(columns=MOVE_COLUMNS)
-    for c in PRODUCT_COLUMNS:
-        if c not in urunler.columns:
-            urunler[c] = pd.Series(dtype=object)
-    for c in MOVE_COLUMNS:
-        if c not in hareketler.columns:
-            hareketler[c] = pd.Series(dtype=object)
-    return urunler[PRODUCT_COLUMNS], hareketler[MOVE_COLUMNS]
-
-
-def save_book(xlsx_path: Path, urunler: pd.DataFrame, hareketler: pd.DataFrame):
-    with pd.ExcelWriter(xlsx_path) as w:
-        urunler.to_excel(w, sheet_name=SHEET_PRODUCTS, index=False)
-        hareketler.to_excel(w, sheet_name=SHEET_MOVES, index=False)
-
-# -------------------------------------------------
-# Stok hesaplama (net)
-# -------------------------------------------------
-
-def hesapla_stok(moves: pd.DataFrame) -> pd.DataFrame:
-    if moves.empty:
-        return pd.DataFrame(columns=["urun_kodu", "urun_adi", "stok_miktar", "birim"])
-    t = moves.copy()
-    t["sign"] = t["islem_turu"].astype(str).str.lower().str.startswith("giriş").astype(int).replace({1:1,0:-1})
-    t["net"] = pd.to_numeric(t["miktar"], errors="coerce").fillna(0.0) * t["sign"]
-    grp = t.groupby(["urun_kodu", "urun_adi", "birim"], as_index=False)["net"].sum().rename(columns={"net":"stok_miktar"})
-    return grp
-
-# -------------------------------------------------
-# UI
-# -------------------------------------------------
-
-st.set_page_config(page_title="Depo Yönetimi v6", page_icon="📦", layout="wide")
-
-# ---- Basit tema iyileştirmeleri (yalın kart stili) ----
-st.markdown(
-    """
-    <style>
-      .app-subtitle { color:#a3a8b8; font-size:0.95rem; margin-top:-12px; margin-bottom:12px; }
-      .card { border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:16px 18px; margin:8px 0 18px 0; background:rgba(255,255,255,0.02); }
-      .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:rgba(125, 211, 252, 0.15); color:#7dd3fc; font-size:0.8rem; margin-right:6px; }
-      .muted { color:#9aa1b5; font-size:0.85rem; }
-      .section-title { font-weight:600; font-size:1.05rem; margin-bottom:8px; }
-      .danger { background:rgba(239,68,68,.12); color:#fecaca; }
-      .success { background:rgba(34,197,94,.12); color:#bbf7d0; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.title("📦 Depo Yönetimi v6 — Drive Üzerinden")
-st.markdown('<div class="app-subtitle">Drive ile senkron çalışan depo hareketleri · arama · rapor</div>', unsafe_allow_html=True)
-
-FILE_ID_RAW = st.secrets.get("gdrive", {}).get("file_id", "").strip()
-FILE_ID = _extract_id(FILE_ID_RAW)
-if not FILE_ID:
-    st.error("Lütfen .streamlit/secrets.toml içine [gdrive] file_id =  ekleyin (Drive dosya ID veya link).")
-    st.stop()
-
+# --- Yan Menü Logo ---
 with st.sidebar:
-    page = st.radio("Menü", ["Giriş/Çıkış", "Ürünler (Drive)", "Rapor"], index=0)
-    st.caption("Ürün arama ve rapor tarih filtresi eklendi.")
+    st.image("Artboard 3.png", width=120)
+    st.markdown("### Depo Yönetimi")
 
-# En güncel defteri indir
-if not download_drive_excel(FILE_ID, LOCAL_FILE):
-    st.stop()
+# --- Üst Başlık Logo + Başlık ---
+col1, col2 = st.columns([1,4])
+with col1:
+    st.image("Artboard 3.png", width=100)
+with col2:
+    st.markdown("## 📦 Depo Yönetimi v6 — Drive Üzerinden")
 
-urunler_df, hareket_df = load_book(LOCAL_FILE)
+# --- Menü ---
+menu = st.sidebar.radio("Menü", ["Giriş/Çıkış", "Rapor"])
 
-# ---------------- Ürünler ----------------
-if page == "Ürünler (Drive)":
-    st.markdown('<div class="section-title">🧾 Ürünler (Drive)</div>', unsafe_allow_html=True)
-    st.dataframe(urunler_df, use_container_width=True, hide_index=True)
+# --- Ürünleri Yükle ---
+def load_products():
+    data = worksheet_products.get_all_records()
+    return pd.DataFrame(data)
 
-# ---------------- Giriş/Çıkış ----------------
-elif page == "Giriş/Çıkış":
-    st.markdown('<div class="section-title">🔁 Giriş / Çıkış</div>', unsafe_allow_html=True)
-st.markdown('<div class="muted">Ürün seç, miktarı gir ve kaydet. Kayıtlar anında Drive\'a yazılır.</div>', unsafe_allow_html=True)
-    if urunler_df.empty:
-        st.warning("Drive Excel'de ürün bulunamadı. 'urunler' sayfasında 'urun_kodu' ve 'urun_adi' kolonları olduğundan emin olun.")
+# --- Logları Yükle ---
+def load_logs():
+    data = worksheet_logs.get_all_records()
+    return pd.DataFrame(data)
+
+# --- Log Ekle ---
+def add_log(product_code, product_name, hareket, miktar):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    worksheet_logs.append_row([now, product_code, product_name, hareket, miktar])
+
+# --- Giriş / Çıkış Bölümü ---
+if menu == "Giriş/Çıkış":
+    st.subheader("Mal Girişi / Çıkışı")
+
+    products_df = load_products()
+    search = st.text_input("Ürün Ara (Kod veya İsim)")
+
+    if search:
+        filtered = products_df[products_df.apply(lambda row: search.lower() in str(row["Ürün Kodu"]).lower() or search.lower() in str(row["Ürün Adı"]).lower(), axis=1)]
     else:
-        # Ürün arama filtresi (ad/kod)
-        search = st.text_input("🔎 Ürün Ara (Ad veya Kod)", placeholder="ör. vida, 1002, filtre...")
-        fdf = urunler_df.copy()
-        if search:
-            s = search.strip().lower()
-            fdf = fdf[fdf.apply(lambda r: s in str(r["urun_kodu"]).lower() or s in str(r["urun_adi"]).lower(), axis=1)]
-            if fdf.empty:
-                st.info("Aramanızla eşleşen ürün yok, tüm ürünler listelendi.")
-                fdf = urunler_df
-        # Seçim etiketlerini "kod — ad" yap
-        fdf = fdf.assign(label=fdf["urun_kodu"].astype(str) + " — " + fdf["urun_adi"].astype(str))
-        code_from_label = dict(zip(fdf["label"], fdf["urun_kodu"].astype(str)))
-        name_from_code = dict(zip(urunler_df["urun_kodu"].astype(str), urunler_df["urun_adi"].astype(str)))
+        filtered = products_df
 
-        with st.form("move_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                islem = st.selectbox("İşlem Türü", ["Giriş", "Çıkış"], index=0)
-                sel = st.selectbox("Ürün", options=fdf["label"].tolist())
-                urun_kodu = code_from_label.get(sel, "")
-                urun_adi = name_from_code.get(urun_kodu, "")
-                miktar = st.number_input("Miktar *", min_value=0.0, step=1.0)
-                birim = st.selectbox("Birim", ["Adet", "Kutu", "Kg", "Metre", "Litre", "Paket"], index=0)
-            with c2:
-                aciklama = st.text_area("Açıklama", placeholder="Opsiyonel")
-                tarih_val = st.date_input("Tarih", value=date.today(), format="DD.MM.YYYY")
-                st.caption("Kaydet dediğiniz anda dakika zaman damgası eklenip Drive'a yazılır.")
-            submitted = st.form_submit_button("Kaydet ve Drive'a Yaz")
+    product = st.selectbox("Ürün Seç", filtered["Ürün Adı"] + " (" + filtered["Ürün Kodu"] + ")")
+    hareket = st.radio("Hareket Türü", ["Giriş", "Çıkış"])
+    miktar = st.number_input("Miktar", min_value=1, step=1)
 
-        if submitted:
-            stok = hesapla_stok(hareket_df)
-            mevcut_map = dict(zip(stok["urun_kodu"].astype(str), stok["stok_miktar"].astype(float)))
-            if islem == "Çıkış":
-                mevcut = float(mevcut_map.get(urun_kodu, 0.0))
-                if miktar > mevcut:
-                    st.error(f"Yetersiz stok. Mevcut: {mevcut}")
-                    st.stop()
-            now_str = datetime.now(ZoneInfo(TZ)).strftime("%Y-%m-%d %H:%M")
-            yeni = {
-                "tarih": pd.to_datetime(tarih_val),
-                "kayit_zamani": now_str,
-                "islem_turu": islem,
-                "urun_kodu": urun_kodu,
-                "urun_adi": urun_adi,
-                "miktar": float(miktar),
-                "birim": birim,
-                "aciklama": aciklama.strip(),
-            }
-            hareket_df = pd.concat([hareket_df, pd.DataFrame([yeni])], ignore_index=True)
-            save_book(LOCAL_FILE, urunler_df, hareket_df)
-            ok = upload_drive_excel(FILE_ID, LOCAL_FILE)
-            if ok:
-                st.success("Kayıt eklendi ve Drive Excel güncellendi. ⛅")
-            else:
-                st.warning("Drive güncellenemedi, daha sonra tekrar deneyin.")
+    if st.button("Kaydet"):
+        selected_row = filtered.iloc[filtered["Ürün Adı"] + " (" + filtered["Ürün Kodu"] + ")" == product]
+        product_code = selected_row["Ürün Kodu"].values[0]
+        product_name = selected_row["Ürün Adı"].values[0]
+        add_log(product_code, product_name, hareket, miktar)
+        st.success("✅ İşlem kaydedildi ve Google Drive'a yedeklendi!")
 
-    # Geri al (Undo) — son eklenen kaydı sil ve Drive'a geri yaz
-    if st.button("🔙 Son Kaydı Geri Al"):
-        if not hareket_df.empty:
-            hareket_df = hareket_df.iloc[:-1].copy()
-            save_book(LOCAL_FILE, urunler_df, hareket_df)
-            ok2 = upload_drive_excel(FILE_ID, LOCAL_FILE)
-            if ok2:
-                st.success("Son kayıt geri alındı ve Drive güncellendi.")
-            else:
-                st.warning("Yerelde geri alındı, Drive güncellenemedi. Daha sonra tekrar deneyin.")
-        else:
-            st.info("Geri alınacak kayıt yok.")
+# --- Rapor Bölümü ---
+elif menu == "Rapor":
+    st.subheader("📊 Raporlama")
 
-    st.divider()
-    st.markdown('<div class="section-title">🕒 Son Hareketler</div>', unsafe_allow_html=True)
-    st.dataframe(hareket_df.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
+    logs_df = load_logs()
 
-# ---------------- Rapor ----------------
-elif page == "Rapor":
-    st.markdown('<div class="section-title">📅 Rapor</div>', unsafe_allow_html=True)
-    df = hareket_df.copy()
-    try:
-        if not df.empty:
-            # --- Tarih kolonunu sağlamlaştır ---
-            if "tarih" not in df.columns:
-                st.warning("Veride 'tarih' kolonu yok. Lütfen Drive'daki 'hareketler' sayfasında kolon adlarını kontrol edin.")
-                st.stop()
-            # string/datetime fark etmez, güne indir
-            df["tarih_only"] = pd.to_datetime(df["tarih"], errors="coerce").dt.date
-            # tamamen NaT olduysa uyarı ver
-            if df["tarih_only"].isna().all():
-                st.warning("Tarih bilgileri okunamadı. Lütfen 'hareketler' sayfasında 'tarih' hücrelerinin tarih formatında olduğundan emin olun.")
-                st.stop()
+    if not logs_df.empty:
+        logs_df["Tarih"] = pd.to_datetime(logs_df["Tarih"])
 
-            today = date.today()
+        # Tarih filtresi
+        start_date = st.date_input("Başlangıç Tarihi", value=datetime.today().date())
+        end_date = st.date_input("Bitiş Tarihi", value=datetime.today().date())
 
-            # Hızlı aralıklar
-            rng = st.radio("Hızlı Aralık", ["Bugün", "Bu Hafta", "Bu Ay", "Özel"], horizontal=True)
-            if rng == "Bugün":
-                start, end = today, today
-            elif rng == "Bu Hafta":
-                start = today - timedelta(days=today.weekday())
-                end = today
-            elif rng == "Bu Ay":
-                start = today.replace(day=1)
-                end = today
-            else:
-                c1, c2 = st.columns(2)
-                with c1:
-                    start = st.date_input("Başlangıç", value=today)
-                with c2:
-                    end = st.date_input("Bitiş", value=today)
+        filtered_logs = logs_df[(logs_df["Tarih"].dt.date >= start_date) & (logs_df["Tarih"].dt.date <= end_date)]
 
-            # Ürün çoklu seçim (opsiyonel)
-            prod_labels = (
-                urunler_df.assign(label=urunler_df["urun_kodu"].astype(str) + " — " + urunler_df["urun_adi"].astype(str))
-                if not urunler_df.empty else
-                df.assign(label=df["urun_kodu"].astype(str) + " — " + df["urun_adi"].astype(str))
-            )
-            label_to_code = dict(zip(prod_labels["label"], prod_labels["urun_kodu"].astype(str)))
-            labels = list(prod_labels["label"].unique())
-            sel_labels = st.multiselect("Ürün(ler) — boş bırak = tümü", labels, default=[])
-            sel_codes = [label_to_code[l] for l in sel_labels] if sel_labels else []
+        # Ürün filtresi
+        urunler = filtered_logs["Ürün Adı"].unique().tolist()
+        selected_urun = st.selectbox("Ürün Filtrele", ["Tümü"] + urunler)
 
-            # Filtre uygula
-            mask = (df["tarih_only"] >= start) & (df["tarih_only"] <= end)
-            if sel_codes:
-                mask &= df["urun_kodu"].astype(str).isin([str(x) for x in sel_codes])
-            rapor = df.loc[mask].drop(columns=["tarih_only"]) if "tarih_only" in df else df.loc[mask]
+        if selected_urun != "Tümü":
+            filtered_logs = filtered_logs[filtered_logs["Ürün Adı"] == selected_urun]
 
-            # Sonuçlar (boşsa da net göster)
-            st.markdown(f'<span class="pill">Kayıt: {len(rapor)}</span>', unsafe_allow_html=True)
-            if rapor.empty:
-                st.info("Bu aralık/ürün filtresinde kayıt bulunamadı.")
-            st.dataframe(rapor.sort_values(["tarih", "kayit_zamani"], ascending=False), use_container_width=True, hide_index=True)
+        st.dataframe(filtered_logs)
 
-            # Özet metrikler
-            if rapor.empty:
-                giris_top = 0; cikis_top = 0
-            else:
-                giris_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Giriş", "miktar"], errors="coerce").sum()
-                cikis_top = pd.to_numeric(rapor.loc[rapor["islem_turu"]=="Çıkış", "miktar"], errors="coerce").sum()
-            m1, m2, m3 = st.columns(3)
-with m1:
-    st.markdown('<div class="card success"><b>Toplam Giriş</b><br>'+str(giris_top)+'</div>', unsafe_allow_html=True)
-with m2:
-    st.markdown('<div class="card danger"><b>Toplam Çıkış</b><br>'+str(cikis_top)+'</div>', unsafe_allow_html=True)
-with m3:
-    st.markdown('<div class="card"><b>Net</b><br>'+str(giris_top - cikis_top)+'</div>', unsafe_allow_html=True)
-
-            # Ürün bazlı özet (boşsa boş tablo)
-            t = rapor.copy()
-            if not t.empty:
-                t["miktar"] = pd.to_numeric(t["miktar"], errors="coerce").fillna(0)
-                t["giris"] = t.apply(lambda r: r["miktar"] if r["islem_turu"]=="Giriş" else 0, axis=1)
-                t["cikis"] = t.apply(lambda r: r["miktar"] if r["islem_turu"]=="Çıkış" else 0, axis=1)
-                pvt = t.groupby(["urun_kodu","urun_adi","birim"], as_index=False).agg({"giris":"sum","cikis":"sum"})
-                pvt["net"] = pvt["giris"] - pvt["cikis"]
-            else:
-                pvt = pd.DataFrame(columns=["urun_kodu","urun_adi","birim","giris","cikis","net"])
-            st.markdown("**Ürün Bazlı Özet**")
-            st.dataframe(pvt, use_container_width=True, hide_index=True)
-
-            # İndir
-            buf = io.BytesIO(); rapor.to_excel(buf, index=False)
-            st.download_button("Raporu Excel İndir", data=buf.getvalue(), file_name="depo_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.caption("Hareket kaydı yok.")
-    except Exception as e:
-        st.error("Rapor oluştururken bir hata oluştu: " + str(e))
-        st.stop()
+        if not filtered_logs.empty:
+            summary = filtered_logs.groupby(["Ürün Adı", "Hareket"]).agg({"Miktar": "sum"}).reset_index()
+            st.write("### Özet")
+            st.dataframe(summary)
+    else:
+        st.info("Henüz kayıt bulunmamaktadır.")
