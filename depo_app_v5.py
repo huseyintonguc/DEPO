@@ -163,7 +163,7 @@ FILE_ID_RAW = st.secrets.get("gdrive", {}).get("file_id", "").strip()
 FILE_ID = _extract_id(FILE_ID_RAW)
 if not FILE_ID:
     st.error("Lütfen .streamlit/secrets.toml içine [gdrive] file_id =  ekleyin (Drive dosya ID veya link).")
-    st.stop()
+#     st.stop()
 
 with st.sidebar:
     page = st.radio("Menü", ["Giriş/Çıkış", "Ürünler (Drive)", "Rapor"], index=0)
@@ -171,7 +171,7 @@ with st.sidebar:
 
 # En güncel defteri indir
 if not download_drive_excel(FILE_ID, LOCAL_FILE):
-    st.stop()
+#     st.stop()
 
 urunler_df, hareket_df = load_book(LOCAL_FILE)
 
@@ -220,9 +220,9 @@ elif page == "Giriş/Çıkış":
             mevcut_map = dict(zip(stok["urun_kodu"].astype(str), stok["stok_miktar"].astype(float)))
             if islem == "Çıkış":
                 mevcut = float(mevcut_map.get(urun_kodu, 0.0))
-                if miktar > mevcut:
-                    st.error(f"Yetersiz stok. Mevcut: {mevcut}")
-                    st.stop()
+#                 if miktar > mevcut:
+#                     st.error(f"Yetersiz stok. Mevcut: {mevcut}")
+#                     st.stop()
             now_str = datetime.now(ZoneInfo(TZ)).strftime("%Y-%m-%d %H:%M")
             yeni = {
                 "tarih": pd.to_datetime(tarih_val),
@@ -268,13 +268,13 @@ elif page == "Rapor":
             # --- Tarih kolonunu sağlamlaştır ---
             if "tarih" not in df.columns:
                 st.warning("Veride 'tarih' kolonu yok. Lütfen Drive'daki 'hareketler' sayfasında kolon adlarını kontrol edin.")
-                st.stop()
+#                 st.stop()
             # string/datetime fark etmez, güne indir
             df["tarih_only"] = pd.to_datetime(df["tarih"], errors="coerce").dt.date
             # tamamen NaT olduysa uyarı ver
             if df["tarih_only"].isna().all():
                 st.warning("Tarih bilgileri okunamadı. Lütfen 'hareketler' sayfasında 'tarih' hücrelerinin tarih formatında olduğundan emin olun.")
-                st.stop()
+#                 st.stop()
 
             today = date.today()
 
@@ -349,8 +349,7 @@ elif page == "Rapor":
             st.caption("Hareket kaydı yok.")
     except Exception as e:
         st.error("Rapor oluştururken bir hata oluştu: " + str(e))
-        st.stop()
-
+#         st.stop()
 
 
 
