@@ -171,6 +171,7 @@ with st.sidebar:
 
 # En güncel defteri indir
 if not download_drive_excel(FILE_ID, LOCAL_FILE):
+    pass
 #     st.stop()
 
 urunler_df, hareket_df = load_book(LOCAL_FILE)
@@ -350,7 +351,6 @@ elif page == "Rapor":
     except Exception as e:
         st.error("Rapor oluştururken bir hata oluştu: " + str(e))
 #         st.stop()
-
 
 
 
