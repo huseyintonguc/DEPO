@@ -28,14 +28,15 @@ def load_secrets():
 
 secrets = load_secrets()
 ty_secrets = secrets.get("trendyol", {})
-SELLER_ID = ty_secrets.get("seller_id", "")
-API_KEY = ty_secrets.get("api_key", "")
-API_SECRET = ty_secrets.get("api_secret", "")
+# Cloud ortamları için os.environ desteği eklendi
+SELLER_ID = os.environ.get("TRENDYOL_SELLER_ID") or ty_secrets.get("seller_id", "")
+API_KEY = os.environ.get("TRENDYOL_API_KEY") or ty_secrets.get("api_key", "")
+API_SECRET = os.environ.get("TRENDYOL_API_SECRET") or ty_secrets.get("api_secret", "")
 
 tg_secrets = secrets.get("telegram", {})
-BOT_TOKEN = tg_secrets.get("bot_token", "")
-CHAT_ID = tg_secrets.get("chat_id", "")
-REPORT_TIME = tg_secrets.get("report_time", "20:00") # Her gün saat kaçta çalışacağı
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or tg_secrets.get("bot_token", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or tg_secrets.get("chat_id", "")
+REPORT_TIME = os.environ.get("REPORT_TIME") or tg_secrets.get("report_time", "20:00") # Her gün saat kaçta çalışacağı
 
 # --- Telegram Bot API İşlevleri ---
 def send_telegram_message(text):
@@ -234,10 +235,30 @@ def process_and_report():
     save_current_data(current_data)
     print("Karşılaştırma tamamlandı, veriler güncellendi.")
 
+# --- Health Check Sunucusu (Cloud İçin) ---
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running successfully!")
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f"Health check sunucusu {port} portunda başlatıldı.")
+    server.serve_forever()
+
 # --- Zamanlayıcı (Scheduler) Akışı ---
 if __name__ == "__main__":
     print(f"Trendyol Stok Botu başlatıldı. Raporlanma saati: {REPORT_TIME}")
     print("Mevcut durumu hemen kontrol etmek isterseniz (Test amaçlı), 'process_and_report()' fonksiyonunu manuel olarak çağırabilirsiniz.")
+
+    # Cloud platformlarında (Render vb.) botun uyumaması için HTTP sunucusunu arka planda başlat
+    threading.Thread(target=run_health_server, daemon=True).start()
 
     # İsteğe bağlı: Program ilk başladığında mevcut durumu veritabanına almasını isterseniz
     # process_and_report()

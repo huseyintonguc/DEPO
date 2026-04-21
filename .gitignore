@@ -1,0 +1,8 @@
+
+# Güvenlik ve Özel Veriler
+secrets.toml
+.streamlit/secrets.toml
+data/
+*.json
+*.xlsx
+__pycache__/
