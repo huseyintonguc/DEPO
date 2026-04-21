@@ -260,6 +260,9 @@ if __name__ == "__main__":
     # Cloud platformlarında (Render vb.) botun uyumaması için HTTP sunucusunu arka planda başlat
     threading.Thread(target=run_health_server, daemon=True).start()
 
+    # Bot ilk çalıştığında Telegram'a test/bilgi mesajı gönder (Bağlantının çalıştığını teyit etmek için)
+    send_telegram_message(f"🟢 <b>Trendyol Stok Botu Başlatıldı!</b>\nSistem başarıyla aktif edildi. Ayarlanan rapor saati: <b>{REPORT_TIME}</b>\n\nStoğu kapanan ürünler tespit edildiğinde buradan bilgilendirileceksiniz.")
+
     # İsteğe bağlı: Program ilk başladığında mevcut durumu veritabanına almasını isterseniz
     # process_and_report()
 
