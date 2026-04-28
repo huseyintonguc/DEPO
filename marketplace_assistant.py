@@ -485,6 +485,88 @@ def get_trendyol_questions_stats():
         }, ensure_ascii=False)
 
 
+# Tool function: Answer a customer question
+def answer_trendyol_question(question_id, text):
+    """
+    Trendyol API'si üzerinden spesifik bir müşteri sorusuna cevap yazar.
+    """
+    if not trendyol_seller_id or not trendyol_api_key or not trendyol_api_secret:
+        return json.dumps({
+            "error": "Trendyol API bilgileri eksik."
+        }, ensure_ascii=False)
+
+    if not question_id or not text:
+        return json.dumps({"error": "question_id ve text zorunludur."}, ensure_ascii=False)
+
+    if len(text) < 10 or len(text) > 2000:
+        return json.dumps({"error": "Cevap metni 10 ile 2000 karakter arasında olmalıdır."}, ensure_ascii=False)
+
+    url = f"https://apigw.trendyol.com/integration/qna/sellers/{trendyol_seller_id}/questions/{question_id}/answers"
+    headers = get_trendyol_auth_header(trendyol_api_key, trendyol_api_secret)
+
+    payload = {
+        "text": text
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+
+        if response.status_code == 200:
+            data = response.json()
+            return json.dumps({
+                "success": True,
+                "message": "Soru başarıyla cevaplandı.",
+                "answerId": data.get("answerId")
+            }, ensure_ascii=False)
+        else:
+            return json.dumps({
+                "error": f"API Hatası: HTTP {response.status_code}",
+                "details": response.text
+            }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"İşlem sırasında hata oluştu: {str(e)}"}, ensure_ascii=False)
+
+
+# Tool function: Approve a return claim
+def approve_trendyol_claim(claim_id, claim_line_item_id):
+    """
+    Trendyol API'si üzerinden depoya ulaşan iade siparişini (WaitingInAction) onaylar.
+    """
+    if not trendyol_seller_id or not trendyol_api_key or not trendyol_api_secret:
+        return json.dumps({
+            "error": "Trendyol API bilgileri eksik."
+        }, ensure_ascii=False)
+
+    if not claim_id or not claim_line_item_id:
+        return json.dumps({"error": "claim_id ve claim_line_item_id zorunludur."}, ensure_ascii=False)
+
+    url = f"https://apigw.trendyol.com/integration/order/sellers/{trendyol_seller_id}/claims/{claim_id}/items/approve"
+    headers = get_trendyol_auth_header(trendyol_api_key, trendyol_api_secret)
+
+    payload = {
+        "claimLineItemIdList": [
+            claim_line_item_id
+        ],
+        "params": {}
+    }
+
+    try:
+        response = requests.put(url, headers=headers, json=payload)
+
+        if response.status_code == 200:
+            return json.dumps({
+                "success": True,
+                "message": f"{claim_line_item_id} ID'li iade kalemi başarıyla onaylandı. Statüsü 'WaitingFraudCheck' veya 'Accepted' olarak güncellenecektir."
+            }, ensure_ascii=False)
+        else:
+            return json.dumps({
+                "error": f"API Hatası: HTTP {response.status_code}",
+                "details": response.text
+            }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"İşlem sırasında hata oluştu: {str(e)}"}, ensure_ascii=False)
+
+
 # Define the tools available to the OpenAI assistant
 tools = [
     {
@@ -576,12 +658,15 @@ if prompt := st.chat_input("Pazar yerleri hakkında bir soru sorun (Örn: Trendy
             api_messages.insert(0, {
                 "role": "system",
                 "content": "Sen pazar yerleri (Trendyol) yönetimi konusunda uzman ve kullanıcılara veri odaklı, net ve detaylı analiz raporları sunan bir asistansın. "
-                           "Kullanıcı senden aşağıdaki alanlarda rapor isteyebilir:\n\n"
+                           "Ayrıca müşteri sorularını cevaplayabilir ve iadeleri onaylayabilirsin.\n\n"
+                           "Kullanıcı senden aşağıdaki alanlarda rapor ve İŞLEM isteyebilir:\n\n"
                            "1. **Operasyonel Raporlar (SLA ve Süreç Takibi)**: Açık ve bekleyen siparişler listesi, kargoya veriliş süresi dolmak üzere olan SLA riskli siparişler (gecikenler), siparişlerin şehirlere ve kargo firmalarına dağılımı, kargo durum ve teslimat raporu.\n"
                            "2. **Finansal Raporlar**: Tahmini net hakediş (payout), pazaryeri komisyon kesintileri, kargo kesintisi raporları ve ortalama sepet tutarı.\n"
                            "3. **Stok ve Envanter Raporları**: Kritik stok seviyesi (Out of Stock) raporu, satış hızı (velocity) analizi, güncel toplam ve aktif ürün sayıları.\n"
-                           "4. **Müşteri ve İade Raporları**: İade nedenleri analiz raporu (Kusurlu ürün vs. kalite kontrol tespiti), müşteri soruları, yanıt bekleyen soruların durumu.\n\n"
-                           "Bu raporları oluştururken her zaman fonksiyonları (tools) kullanarak gerçek API verilerini çek. Eğer istenen bazı metrikler (Örn: ROAS, Yorumlar) mevcut tool'lardan gelmiyorsa, API ile anlık çekilemediğini nazikçe belirt."
+                           "4. **Müşteri ve İade Raporları**: İade nedenleri analiz raporu (Kusurlu ürün vs. kalite kontrol tespiti), müşteri soruları, yanıt bekleyen soruların durumu.\n"
+                           "5. **Müşteri Sorularını Cevaplama**: Kullanıcı soruları cevaplamanı isterse `get_trendyol_questions_stats` ile soruları çekip `answer_trendyol_question` ile cevaplayabilirsin.\n"
+                           "6. **İadeleri Onaylama**: Kullanıcı iadeleri onaylamanı isterse `get_trendyol_return_stats` ile onay bekleyenleri (WaitingInAction) çekip `approve_trendyol_claim` ile onaylayabilirsin.\n\n"
+                           "Bu raporları oluştururken veya işlem yaparken her zaman fonksiyonları (tools) kullanarak gerçek API verilerini çek. Eğer istenen bazı metrikler (Örn: ROAS, Yorumlar) mevcut tool'lardan gelmiyorsa, API ile anlık çekilemediğini nazikçe belirt."
             })
 
             try:
@@ -642,6 +727,32 @@ if prompt := st.chat_input("Pazar yerleri hakkında bir soru sorun (Örn: Trendy
                             })
                         elif function_name == "get_trendyol_questions_stats":
                             function_response = get_trendyol_questions_stats()
+
+                            api_messages.append({
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": function_name,
+                                "content": function_response,
+                            })
+                        elif function_name == "answer_trendyol_question":
+                            args = json.loads(tool_call.function.arguments)
+                            function_response = answer_trendyol_question(
+                                question_id=args.get("question_id"),
+                                text=args.get("text")
+                            )
+
+                            api_messages.append({
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": function_name,
+                                "content": function_response,
+                            })
+                        elif function_name == "approve_trendyol_claim":
+                            args = json.loads(tool_call.function.arguments)
+                            function_response = approve_trendyol_claim(
+                                claim_id=args.get("claim_id"),
+                                claim_line_item_id=args.get("claim_line_item_id")
+                            )
 
                             api_messages.append({
                                 "tool_call_id": tool_call.id,
