@@ -87,9 +87,15 @@ def get_trendyol_order_stats():
         total_active_orders = len(all_orders)
         delayed_orders_count = 0
         cargo_distribution = {}
+        total_revenue = 0.0
+        product_sales_freq = {}
         today = date.today()
 
         for order in all_orders:
+            # Toplam ciroyu hesapla
+            total_price = order.get("totalPrice", 0.0)
+            total_revenue += float(total_price)
+
             # Gecikenleri hesapla
             agreed_delivery_ms = order.get("agreedDeliveryDate")
             if agreed_delivery_ms:
@@ -104,11 +110,26 @@ def get_trendyol_order_stats():
             else:
                 cargo_distribution[cargo_provider] = 1
 
+            # En çok satan ürünleri hesapla
+            for line in order.get("lines", []):
+                product_name = line.get("productName", "Bilinmeyen Ürün")
+                quantity = line.get("quantity", 0)
+                if product_name in product_sales_freq:
+                    product_sales_freq[product_name] += quantity
+                else:
+                    product_sales_freq[product_name] = quantity
+
+        # En çok satan ilk 5 ürünü bul
+        top_selling_products = sorted(product_sales_freq.items(), key=lambda x: x[1], reverse=True)[:5]
+        top_selling_products_list = [{"productName": k, "quantity": v} for k, v in top_selling_products]
+
         summary = {
             "total_active_orders": total_active_orders,
             "delayed_orders_count": delayed_orders_count,
             "cargo_distribution": cargo_distribution,
-            "message": f"Toplam {total_active_orders} aktif sipariş var. {delayed_orders_count} tanesi gecikme riski taşıyor veya gecikmiş."
+            "total_revenue_from_active_orders": round(total_revenue, 2),
+            "top_selling_products_in_active_orders": top_selling_products_list,
+            "message": f"Toplam {total_active_orders} aktif sipariş var. {delayed_orders_count} tanesi gecikme riski taşıyor veya gecikmiş. Aktif siparişlerden beklenen toplam ciro {round(total_revenue, 2)} TL."
         }
 
         return json.dumps(summary, ensure_ascii=False)
@@ -184,16 +205,28 @@ def get_trendyol_product_stats():
 
         yesterday_active_count = sum(1 for p in previous_data.values() if p.get("quantity", 0) > 0)
 
-        # Güncel veriyi sözlüğe çevir (barkoda göre)
+        # Güncel veriyi sözlüğe çevir (barkoda göre) ve kritik stoku hesapla
         current_data_dict = {}
+        low_stock_products = []
+
         for p in all_products:
             barcode = str(p.get("barcode", ""))
+            qty = p.get("quantity", 0)
+            title = p.get("title", "Bilinmeyen Ürün")
+
             current_data_dict[barcode] = {
-                "title": p.get("title", "Bilinmeyen Ürün"),
-                "quantity": p.get("quantity", 0),
+                "title": title,
+                "quantity": qty,
                 "productCode": p.get("productCode", ""),
                 "stockCode": p.get("stockCode", ""),
             }
+
+            # Kritik stok (0'dan büyük, 5 veya daha az ise)
+            if 0 < qty <= 5:
+                low_stock_products.append({"title": title, "quantity": qty, "barcode": barcode})
+
+        # Kritik stoklu ürünleri adedine göre sırala (azdan çoğa)
+        low_stock_products = sorted(low_stock_products, key=lambda x: x["quantity"])
 
         closed_products_count = 0
         closed_product_titles = []
@@ -212,7 +245,9 @@ def get_trendyol_product_stats():
             "current_active_products": current_active_products_count,
             "yesterday_active_products": yesterday_active_count if previous_data else "Bilinmiyor",
             "closed_products_count_today": closed_products_count,
-            "closed_product_examples": closed_product_titles[:5] # Sadece ilk 5 örneği göster
+            "closed_product_examples": closed_product_titles[:5], # Sadece ilk 5 örneği göster
+            "low_stock_products_count": len(low_stock_products),
+            "low_stock_product_examples": low_stock_products[:10] # İlk 10 örneği göster
         }
 
         # Güncel veriyi kaydet ki yarına kullanılsın
@@ -236,7 +271,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "get_trendyol_order_stats",
-            "description": "Trendyol'dan sipariş verilerini çeker. Anlık sipariş adetini, gecikmeye giren/girecek sipariş sayısını ve hangi kargolara (kargo şirketleri) dağıtıldığını verir.",
+            "description": "Trendyol'dan sipariş verilerini çeker. Anlık sipariş adetini, gecikmeye giren/girecek sipariş sayısını, siparişlerin cirosunu, en çok satan ürünleri ve hangi kargolara (kargo şirketleri) dağıtıldığını verir.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -248,7 +283,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "get_trendyol_product_stats",
-            "description": "Trendyol'dan ürün verilerini çeker. Kaç adet ürünümüzün aktif olduğunu, dün kaç adet aktif olduğunu ve bugün stoğu bitip kapanan ürün olup olmadığını verir.",
+            "description": "Trendyol'dan ürün verilerini çeker. Aktif ürün sayısını, kapanan ürünleri ve kritik stok (azalan stok) seviyesindeki ürünleri verir.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -284,7 +319,7 @@ if prompt := st.chat_input("Pazar yerleri hakkında bir soru sorun (Örn: Trendy
             api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state["messages"]]
             api_messages.insert(0, {
                 "role": "system",
-                "content": "Sen pazar yerleri (Trendyol, Hepsiburada vb.) yönetimi konusunda uzman ve kullanıcılara veri odaklı, net ve detaylı analiz raporları sunan bir asistansın. Her zaman aradığın veriyi çekmek için fonkisyonları (tools) kullan. Kullanıcı sana 'bugün kapanan var mı?', 'geciken sipariş var mı?', 'kargo dağılımı nasıl?' gibi sorular sorduğunda sadece ilgili tool'lardan dönen verileri analiz et, gereksiz yorumlardan kaçın ve net sayılar/listeler ile Türkçe rapor ver."
+                "content": "Sen pazar yerleri (Trendyol, Hepsiburada vb.) yönetimi konusunda uzman ve kullanıcılara veri odaklı, net ve detaylı analiz raporları sunan bir asistansın. Her zaman aradığın veriyi çekmek için fonkisyonları (tools) kullan. Kullanıcıya sipariş sayıları, cirolar, çok satanlar, kritik stoklar ve kapanan ürünler hakkında sadece ilgili tool'lardan dönen verileri analiz ederek, gereksiz yorumlardan kaçınıp net sayılar/listeler ile Türkçe rapor ver."
             })
 
             try:
