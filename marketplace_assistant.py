@@ -293,13 +293,14 @@ def get_trendyol_return_stats():
             "error": "Trendyol API bilgileri eksik. Lütfen sol taraftaki menüden Seller ID, API Key ve API Secret bilgilerini doldurun."
         }, ensure_ascii=False)
 
-    url = f"https://apigw.trendyol.com/integration/claims/sellers/{trendyol_seller_id}/claims"
+    url = f"https://apigw.trendyol.com/integration/order/sellers/{trendyol_seller_id}/claims"
     headers = get_trendyol_auth_header(trendyol_api_key, trendyol_api_secret)
 
     all_claims = []
-    # Maksimum limitli çekim (örnek olarak ilk sayfalar veya status verilerek)
     params = {
-        "size": 200, # Claims servisi genellikle 200 döner
+        "claimItemStatus": "WaitingInAction", # İade onay işlemleri için bekleyenleri getirir
+        "size": 50,
+        "page": 0
     }
 
     try:
@@ -318,21 +319,38 @@ def get_trendyol_return_stats():
         total_claims = len(content)
         reason_distribution = {}
         status_distribution = {}
+        actionable_claims = []
 
         for claim in content:
-            # İade nedenlerini topla
-            reason = claim.get("customerReason", claim.get("reason", "Bilinmeyen Neden"))
+            # İade nedenlerini topla (Order/Claims endpointi formatı farklı)
+            claim_type = claim.get("claimType", {})
+            reason = claim_type.get("name", "Bilinmeyen Neden")
+
             if reason in reason_distribution:
                 reason_distribution[reason] += 1
             else:
                 reason_distribution[reason] = 1
 
             # İade statüleri
-            status = claim.get("claimStatus", "Bilinmeyen Statü")
+            status = claim.get("status", "Bilinmeyen Statü")
             if status in status_distribution:
                 status_distribution[status] += 1
             else:
                 status_distribution[status] = 1
+
+            # Eğer statü onay bekliyorsa (WaitingInAction) listeye ekle
+            if status == "WaitingInAction":
+                claim_id = claim.get("id")
+                # İade kalemlerini çıkar
+                item_ids = [item.get('id') for batch in claim.get('items', []) for item in batch.get('claimItems', [])]
+
+                if claim_id and item_ids:
+                    for i_id in item_ids:
+                        actionable_claims.append({
+                            "claimId": claim_id,
+                            "claimLineItemId": i_id,
+                            "customerReason": reason
+                        })
 
         # En çok iade edilen nedenleri sırala
         top_reasons = sorted(reason_distribution.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -342,7 +360,8 @@ def get_trendyol_return_stats():
             "total_returns_analyzed": total_claims,
             "return_status_distribution": status_distribution,
             "top_return_reasons": top_reasons_list,
-            "message": f"Toplam {total_claims} adet iade talebi analiz edildi. NLP analizi ve kalite kontrol iyileştirmeleri için 'top_return_reasons' kullanılabilir."
+            "actionable_claims_waiting_approval": actionable_claims, # Onay bekleyen iadeler
+            "message": f"Toplam {total_claims} adet iade talebi analiz edildi. Onay bekleyen iadeleri (WaitingInAction) 'approve_trendyol_claim' tool'u ile onaylayabilirsiniz."
         }
 
         return json.dumps(summary, ensure_ascii=False)
