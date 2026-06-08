@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Trendyol Kâr Asistanı</title>
+    <style>
+        body {
+            width: 300px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+        }
+        #header {
+            background-color: #f27a1a;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        #container {
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .input-group label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+        .input-group input {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .input-group input:focus {
+            outline: none;
+            border-color: #f27a1a;
+        }
+        .divider {
+            height: 1px;
+            background-color: #eee;
+            margin: 5px 0;
+        }
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #444;
+        }
+        #profit-net {
+            font-size: 18px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .positive { color: #2e7d32; }
+        .negative { color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <div id="header">₺ Kâr Asistanı</div>
+    <div id="container">
+        <div class="input-group">
+            <label>Satış Fiyatı (₺)</label>
+            <input type="number" id="price" value="0" step="0.01">
+        </div>
+        <div class="input-group">
+            <label>Ürün Maliyeti (₺)</label>
+            <input type="number" id="cost" value="0" step="0.01">
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <div class="input-group" style="flex: 1;">
+                <label>Komisyon (%)</label>
+                <input type="number" id="commission-rate" value="15" step="0.1">
+            </div>
+            <div class="input-group" style="flex: 1;">
+                <label>KDV (%)</label>
+                <input type="number" id="tax-rate" value="20" step="1">
+            </div>
+        </div>
+        <div class="input-group">
+            <label>Kargo Ücreti (₺)</label>
+            <input type="number" id="shipping" value="0" step="0.01">
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="result-row">
+            <span>Komisyon Tutarı:</span>
+            <span id="commission-cost">0.00 ₺</span>
+        </div>
+        <div class="result-row">
+            <span>KDV Tutarı:</span>
+            <span id="tax-cost">0.00 ₺</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="result-row" style="align-items: center;">
+            <strong>Net Kâr:</strong>
+            <span id="profit-net" class="positive">0.00 ₺</span>
+        </div>
+        <div class="result-row" style="justify-content: flex-end;">
+            <span id="profit-margin" style="font-size: 11px; color: #666;">Marj: %0.00</span>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
