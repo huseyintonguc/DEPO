@@ -189,16 +189,35 @@ function injectFloatingCalculator() {
         const cost = parseFloat(document.getElementById('ty-cost').value) || 0;
         const commissionRate = parseFloat(document.getElementById('ty-commission-rate').value) || 0;
         const taxRate = parseFloat(document.getElementById('ty-tax-rate').value) || 0;
-        const shipping = parseFloat(document.getElementById('ty-shipping').value) || 0;
+        const shipping = parseFloat(document.getElementById('ty-shipping').value) || 0; // KDV dahil kargo varsayılıyor
 
+        const kdvRateNum = taxRate / 100;
+
+        // Komisyon
         const commissionCost = price * (commissionRate / 100);
-        const taxCost = price - (price / (1 + (taxRate / 100)));
-        const totalExpenses = cost + commissionCost + shipping + taxCost;
-        const netProfit = price - totalExpenses;
+
+        // Stopaj
+        const fiyatKdvsiz = price / (1 + kdvRateNum);
+        const stopaj = fiyatKdvsiz * 0.01;
+
+        // Hizmet Bedeli (KDV Dahil)
+        const hizmetBedeliKdv = HIZMET_BEDELI_NORMAL * 1.20;
+
+        // Net KDV Hesabı (Tam formül)
+        const satisKdv = price - fiyatKdvsiz;
+        const kargoKdvH = (shipping / 1.20) * 0.20;
+        const hizmetKdv = HIZMET_BEDELI_NORMAL * 0.20;
+        const commKdv = commissionCost - (commissionCost / 1.20);
+        const malKdv = cost - (cost / (1 + kdvRateNum));
+
+        const netKdv = satisKdv - kargoKdvH - hizmetKdv - commKdv - malKdv;
+
+        // Net Kar
+        const netProfit = price - cost - commissionCost - shipping - hizmetBedeliKdv - stopaj - netKdv;
         const profitMargin = price > 0 ? (netProfit / price) * 100 : 0;
 
         document.getElementById('ty-commission-cost').innerText = commissionCost.toFixed(2) + ' ₺';
-        document.getElementById('ty-tax-cost').innerText = taxCost.toFixed(2) + ' ₺';
+        document.getElementById('ty-tax-cost').innerText = netKdv.toFixed(2) + ' ₺';
 
         const netElement = document.getElementById('ty-profit-net');
         netElement.innerText = netProfit.toFixed(2) + ' ₺';
@@ -504,12 +523,16 @@ async function injectOrderKar() {
         const satisFiyati = parseTL(priceEl?.textContent?.trim() || '');
         if (!satisFiyati) continue;
 
-        // Barkod okuma (Genelde sipariş sayfasında alt kısımlarda barkod bulunur)
-        const barcodeEl = row.querySelector('p[data-testid="shipment-package-barcode"]');
+        // Barkod okuma (Sipariş detaylarında line-item-barcode-value veya shipment-package-barcode olarak bulunabilir)
+        const barcodeEl = row.querySelector('p[data-testid="line-item-barcode-value"]') || row.querySelector('p[data-testid="shipment-package-barcode"]');
         const barcode = barcodeEl?.textContent?.trim() || '';
 
+        // Model kodu veya barkod ile LocalDB'den veri ara
+        const modelKoduEl = row.querySelector('p[data-testid="line-item-stock-code-value"]') || row.querySelector('p[data-testid="shipment-package-stock-code"]');
+        const modelKodu = modelKoduEl?.textContent?.trim() || '';
+
         // Ürün verisini LocalDB'den çek
-        const urunData = await LocalDB.getProduct(null, barcode);
+        const urunData = await LocalDB.getProduct(modelKodu, barcode);
         const maliyet = urunData?.urun_maliyeti ?? 0;
         const desi = urunData?.cargo_deci ?? 0;
         const kdvOrani = urunData?.kdv_orani ?? 20;
