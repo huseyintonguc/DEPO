@@ -673,6 +673,128 @@ async function processPricingRows() {
                     aralik.el.appendChild(band);
                 }
             });
+
+            // Fiyat Güncelleme sütununa Etkileşimli Kâr Hesabı Widget'ı ekle
+            const tds = row.querySelectorAll('td');
+            if (tds.length > 0) {
+                const lastTd = tds[tds.length - 1]; // "Fiyat Güncelle" sütunu
+                if (!lastTd.querySelector('.tf-interactive-calc-card')) {
+
+                    // Widget konteyneri
+                    const calcCard = document.createElement('div');
+                    calcCard.className = 'tf-interactive-calc-card';
+                    calcCard.style.cssText = `
+                        margin-top: 10px;
+                        border: 1px solid #f27a1a;
+                        border-radius: 8px;
+                        padding: 10px;
+                        background-color: #fff;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+                        width: 200px;
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    `;
+
+                    // Hesaplamalar için ortalama kargo bulalım
+                    // Varsayılan kargo fiyatı 100 TL ile başlasın, hesaplaKar ile bulabiliriz (Satış Fiyatı geçici bir değer olsun)
+                    const tempSonuc = hesaplaKar(100, maliyet, kdvOrani, desi, 0.15, kargoTipi);
+                    const kargoUcreti = tempSonuc ? tempSonuc.breakdown.kargo : 0;
+
+                    calcCard.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <span style="font-size:12px; font-weight:700; color:#f27a1a; display:flex; align-items:center;">
+                                <span style="background-color:#f27a1a; color:#fff; padding:2px 4px; border-radius:3px; margin-right:6px; font-size:10px;">TF</span>
+                                Kâr Hesabı
+                            </span>
+                            <span style="font-size:12px; cursor:pointer; color:#999;" class="tf-calc-reset" title="Sıfırla">✏️</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px; color:#666;">
+                            <span>Maliyet</span>
+                            <span style="font-weight:700; color:#333;">${formatTL(maliyet)}</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:12px; color:#666;">
+                            <span>Ort. Kargo (KDV dahil)</span>
+                            <span style="font-weight:700; color:#333;">${formatTL(kargoUcreti)}</span>
+                        </div>
+
+                        <div style="margin-bottom:6px;">
+                            <label style="font-size:10px; color:#888; display:block; margin-bottom:4px;">Satış Fiyatı</label>
+                            <input type="number" class="tf-calc-price-input" placeholder="Fiyat girin..." style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='#f27a1a'" onblur="this.style.borderColor='#e2e8f0'">
+                        </div>
+
+                        <div style="display:flex; gap:8px; margin-bottom:12px;">
+                            <div style="flex:1;">
+                                <label style="font-size:10px; color:#888; display:block; margin-bottom:4px;">Komisyon (%)</label>
+                                <input type="number" class="tf-calc-comm-input" value="${guncelKomisyon}" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='#f27a1a'" onblur="this.style.borderColor='#e2e8f0'">
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-size:10px; color:#888; display:block; margin-bottom:4px;">KDV (%)</label>
+                                <input type="number" class="tf-calc-kdv-input" value="${kdvOrani}" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; background:#f8fafc; color:#64748b;" disabled>
+                            </div>
+                        </div>
+
+                        <button class="tf-calc-btn" style="width:100%; background-color:#f27a1a; color:#fff; border:none; border-radius:4px; padding:8px 0; font-size:12px; font-weight:600; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.backgroundColor='#d46b08'" onmouseout="this.style.backgroundColor='#f27a1a'">Hesapla</button>
+
+                        <div class="tf-calc-result-container" style="margin-top:12px; display:none; padding-top:10px; border-top:1px dashed #e2e8f0;">
+                            <div style="display:flex; justify-content:space-between; font-size:10px; margin-bottom:4px; color:#666;">
+                                <span>Komisyon Tutarı:</span>
+                                <span class="tf-calc-comm-cost" style="font-weight:600;">0.00 ₺</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; font-size:10px; margin-bottom:10px; color:#666;">
+                                <span>Net KDV:</span>
+                                <span class="tf-calc-kdv-cost" style="font-weight:600;">0.00 ₺</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <span style="font-size:11px; font-weight:600; color:#475569;">Net Kâr:</span>
+                                <span class="tf-calc-net" style="font-size:14px; font-weight:700; color:#10b981;">0.00 ₺</span>
+                            </div>
+                            <div style="text-align:right;">
+                                <span class="tf-calc-marj" style="font-size:10px; color:#64748b; font-weight:500;">Marj: %0.00</span>
+                            </div>
+                        </div>
+                    `;
+
+                    lastTd.appendChild(calcCard);
+
+                    // Etkileşimler
+                    const btn = calcCard.querySelector('.tf-calc-btn');
+                    const priceInput = calcCard.querySelector('.tf-calc-price-input');
+                    const commInput = calcCard.querySelector('.tf-calc-comm-input');
+                    const resContainer = calcCard.querySelector('.tf-calc-result-container');
+                    const resNet = calcCard.querySelector('.tf-calc-net');
+                    const resMarj = calcCard.querySelector('.tf-calc-marj');
+                    const resetBtn = calcCard.querySelector('.tf-calc-reset');
+
+                    btn.addEventListener('click', () => {
+                        const sPrice = parseFloat(priceInput.value);
+                        const cRate = parseFloat(commInput.value);
+
+                        if (sPrice > 0 && cRate >= 0) {
+                            const dynSonuc = hesaplaKar(sPrice, maliyet, kdvOrani, desi, cRate / 100, kargoTipi);
+                            if (dynSonuc) {
+                                const resCommCost = calcCard.querySelector('.tf-calc-comm-cost');
+                                const resKdvCost = calcCard.querySelector('.tf-calc-kdv-cost');
+                                if (resCommCost) resCommCost.textContent = formatTL(dynSonuc.breakdown.komisyon);
+                                if (resKdvCost) resKdvCost.textContent = formatTL(Math.abs(dynSonuc.breakdown.netKdv));
+                                resNet.textContent = formatTL(dynSonuc.netKar);
+                                resMarj.textContent = `Marj: %${dynSonuc.karMarji.toFixed(1)}`;
+
+                                if (dynSonuc.netKar >= 0) {
+                                    resNet.style.color = '#0f9d58'; // Yeşil
+                                } else {
+                                    resNet.style.color = '#db4437'; // Kırmızı
+                                }
+
+                                resContainer.style.display = 'block';
+                            }
+                        }
+                    });
+
+                    resetBtn.addEventListener('click', () => {
+                        priceInput.value = '';
+                        resContainer.style.display = 'none';
+                    });
+                }
+            }
         }
     }
 }
