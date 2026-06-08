@@ -5,7 +5,7 @@
     <title>TONGUÇ FİYAT</title>
     <style>
         body {
-            width: 300px;
+            width: 360px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
             padding: 0;
@@ -35,82 +35,211 @@
             color: #666;
             font-weight: 600;
         }
-        .input-group input {
+        .input-group input, .input-group select {
             padding: 8px;
             border: 1px solid #ccc;
             border-radius: 6px;
-            font-size: 14px;
+            font-size: 13px;
         }
-        .input-group input:focus {
+        .input-group input:focus, .input-group select:focus {
             outline: none;
             border-color: #f27a1a;
         }
+
+        .kdv-btn-group, .tip-btn-group {
+            display: flex;
+            gap: 4px;
+        }
+
+        .kdv-btn, .tip-btn {
+            flex: 1;
+            padding: 6px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #555;
+            transition: all 0.2s;
+        }
+
+        .kdv-btn.active, .tip-btn.active {
+            background: #f27a1a;
+            color: white;
+            border-color: #f27a1a;
+            font-weight: bold;
+        }
+
         .divider {
             height: 1px;
             background-color: #eee;
             margin: 5px 0;
         }
-        .result-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 13px;
-            color: #444;
-        }
-        #profit-net {
-            font-size: 18px;
+
+        #hesapla-btn {
+            background: #f27a1a;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 6px;
             font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
             margin-top: 5px;
         }
-        .positive { color: #2e7d32; }
-        .negative { color: #d32f2f; }
+        #hesapla-btn:hover { background: #d4621a; }
+
+        /* Sonuç Kartı */
+        #detay-card {
+            display: none;
+            background: white;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .sonuc-kar {
+            text-align: center;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        .sonuc-kar.profit { background: #e8f5e9; border: 1px solid #c8e6c9; color: #2e7d32; }
+        .sonuc-kar.loss { background: #ffebee; border: 1px solid #ffcdd2; color: #c62828; }
+
+        .sonuc-kar-label { font-size: 11px; font-weight: 600; opacity: 0.8; }
+        .sonuc-kar-val { font-size: 22px; font-weight: 800; margin: 4px 0; }
+
+        .sonuc-marj-grid {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            font-size: 11px;
+        }
+        .sonuc-marj-item label { font-weight: normal; opacity: 0.8; margin-right: 4px;}
+        .sonuc-marj-item span { font-weight: bold; }
+
+        .detay-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #444;
+            margin-bottom: 6px;
+        }
+        .detay-row.bold { font-weight: bold; font-size: 13px; color: #111; margin-top: 6px;}
+
+        .detay-val.plus { color: #2e7d32; }
+        .detay-val.minus { color: #c62828; }
+
+        /* Aciklama Paneli */
+        #aciklama-btn {
+            background: none;
+            border: none;
+            color: #f27a1a;
+            font-size: 12px;
+            cursor: pointer;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+            margin-top: 10px;
+            font-weight: 600;
+        }
+
+        #aciklama-panel {
+            display: none;
+            background: #fff8f0;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: #555;
+            margin-top: 5px;
+            border: 1px dashed #ffd8b2;
+        }
+        #aciklama-panel.open { display: block; }
+        .aciklama-item { display: flex; margin-bottom: 4px; }
+        .aciklama-key { font-weight: 600; width: 90px; flex-shrink: 0;}
+        .aciklama-formula { margin-top: 8px; font-style: italic; opacity: 0.8; border-top: 1px solid #ffd8b2; padding-top: 6px;}
+
     </style>
 </head>
 <body>
     <div id="header">₺ TONGUÇ FİYAT</div>
     <div id="container">
+
+        <!-- Kategori & Komisyon -->
         <div class="input-group">
-            <label>Satış Fiyatı (₺)</label>
-            <input type="number" id="price" value="0" step="0.01">
-        </div>
-        <div class="input-group">
-            <label>Ürün Maliyeti (₺)</label>
-            <input type="number" id="cost" value="0" step="0.01">
+            <label>Kategori</label>
+            <select id="kategori"><option value="">Seçiniz</option></select>
         </div>
         <div style="display: flex; gap: 10px;">
-            <div class="input-group" style="flex: 1;">
-                <label>Komisyon (%)</label>
-                <input type="number" id="commission-rate" value="15" step="0.1">
+            <div class="input-group" style="flex: 2;">
+                <label>Alt Kategori</label>
+                <select id="alt-kategori" disabled><option value="">Seçiniz</option></select>
             </div>
             <div class="input-group" style="flex: 1;">
-                <label>KDV (%)</label>
-                <input type="number" id="tax-rate" value="20" step="1">
+                <label>Komisyon %</label>
+                <input type="number" id="komisyon" placeholder="0" step="0.1">
             </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Fiyat & Maliyet -->
+        <div style="display: flex; gap: 10px;">
+            <div class="input-group" style="flex: 1;">
+                <label>Satış Fiyatı (₺)</label>
+                <input type="number" id="satis-fiyati" placeholder="0" step="0.01">
+            </div>
+            <div class="input-group" style="flex: 1;">
+                <label>Ürün Maliyeti (₺)</label>
+                <input type="number" id="maliyet" placeholder="0" step="0.01">
+            </div>
+        </div>
+
+        <!-- KDV -->
+        <div class="input-group">
+            <label>KDV Oranı</label>
+            <div class="kdv-btn-group">
+                <button class="kdv-btn" data-kdv="0">%0</button>
+                <button class="kdv-btn" data-kdv="10">%10</button>
+                <button class="kdv-btn active" data-kdv="20">%20</button>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Kargo & Teslimat -->
+        <div class="input-group">
+            <label>Kargo Ücreti (KDV Dahil ₺)</label>
+            <input type="number" id="kargo" placeholder="0" step="0.01">
         </div>
         <div class="input-group">
-            <label>Kargo Ücreti (₺)</label>
-            <input type="number" id="shipping" value="0" step="0.01">
+            <label>Kargo Teslimat Tipi</label>
+            <div class="tip-btn-group">
+                <button class="tip-btn active" data-tip="normal">Normal</button>
+                <button class="tip-btn" data-tip="bugun">Bugün 🚀</button>
+            </div>
+            <span id="hizmet-hint" style="font-size:10px; color:#888; margin-top:2px;">Hizmet: ₺10.99 + KDV</span>
         </div>
 
-        <div class="divider"></div>
+        <button id="hesapla-btn">Hesapla</button>
 
-        <div class="result-row">
-            <span>Komisyon Tutarı:</span>
-            <span id="commission-cost">0.00 ₺</span>
-        </div>
-        <div class="result-row">
-            <span>KDV Tutarı:</span>
-            <span id="tax-cost">0.00 ₺</span>
+        <!-- Sonuç Alanı -->
+        <div id="detay-card">
+            <div id="sonuc-kar" class="sonuc-kar profit">
+                <!-- Javascript ile doldurulacak -->
+            </div>
+            <div id="detay-rows">
+                <!-- Javascript ile doldurulacak -->
+            </div>
         </div>
 
-        <div class="divider"></div>
+        <button id="aciklama-btn">Nasıl Hesaplanıyor? <span id="aciklama-arrow">▼</span></button>
+        <div id="aciklama-panel"></div>
 
-        <div class="result-row" style="align-items: center;">
-            <strong>Net Kâr:</strong>
-            <span id="profit-net" class="positive">0.00 ₺</span>
-        </div>
-        <div class="result-row" style="justify-content: flex-end;">
-            <span id="profit-margin" style="font-size: 11px; color: #666;">Marj: %0.00</span>
-        </div>
     </div>
     <script src="popup.js"></script>
 </body>
