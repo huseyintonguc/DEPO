@@ -9,7 +9,7 @@
 
     container.innerHTML = `
         <div id="ty-profit-header">
-            <span>₺ Kâr Asistanı</span>
+            <span>₺ TONGUÇ FİYAT</span>
             <button id="ty-profit-toggle">_</button>
         </div>
         <div id="ty-profit-body">

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Trendyol Kâr Asistanı (SellerIQ Alternatifi)",
+  "name": "TONGUÇ FİYAT",
   "version": "1.0",
   "description": "Trendyol ürün ve fiyat düzenleme ekranlarında anlık komisyon, kargo ve net kâr hesaplaması yapar.",
   "permissions": [
