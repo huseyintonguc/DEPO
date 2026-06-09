@@ -45,23 +45,24 @@ function formatTL(val) {
 
 // --- Hesaplama Algoritması (Hardcoded Kargo Ücretleri) ---
 function getCargoFeeLocal(desi, fiyat, kargoTipi) {
+    // User requested "hepsi normal kargo olarak hesaplansın" and provided an Aras Kargo table.
+    // The provided prices are VAT exclusive (KDV hariç). We return KDV dahil (+%20).
     let kargoKdvHaric = 0;
-    if (kargoTipi === 'normal') {
-        if (desi <= 2)       kargoKdvHaric = 83.93;
-        else if (desi <= 5)  kargoKdvHaric = 95.12;
-        else if (desi <= 10) kargoKdvHaric = 110.00;
-        else                 kargoKdvHaric = 130.00;
-    } else {
-        // hizli veya bugun (Trendyol Express)
-        if (fiyat < 200)      kargoKdvHaric = 34.16;
-        else if (fiyat < 350) kargoKdvHaric = 65.83;
-        else {
-            if (desi <= 2)       kargoKdvHaric = 77.54;
-            else if (desi <= 5)  kargoKdvHaric = 93.63;
-            else if (desi <= 10) kargoKdvHaric = 110.00;
-            else                 kargoKdvHaric = 130.00;
-        }
-    }
+    const roundedDesi = Math.ceil(desi); // Desi is usually rounded up
+
+    if (roundedDesi <= 2) kargoKdvHaric = 83.93;
+    else if (roundedDesi === 3) kargoKdvHaric = 95.12;
+    else if (roundedDesi === 4) kargoKdvHaric = 103.68;
+    else if (roundedDesi === 5) kargoKdvHaric = 111.17;
+    else if (roundedDesi === 6) kargoKdvHaric = 121.12;
+    else if (roundedDesi === 7) kargoKdvHaric = 128.46;
+    else if (roundedDesi === 8) kargoKdvHaric = 137.05;
+    else if (roundedDesi === 9) kargoKdvHaric = 144.91;
+    else if (roundedDesi === 10) kargoKdvHaric = 153.48;
+    else if (roundedDesi === 11) kargoKdvHaric = 161.77;
+    else if (roundedDesi === 12) kargoKdvHaric = 167.73;
+    else kargoKdvHaric = 175.34; // 13+ desi (fallback to the max provided in the image)
+
     return Math.round(kargoKdvHaric * 1.20 * 100) / 100;
 }
 
