@@ -186,3 +186,98 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('aciklama-arrow').textContent = aciklamaAcik ? '▲' : '▼';
     });
 });
+
+// ====================================================================================
+// --- CSV İÇE AKTAR (TOPLU YÜKLEME) ---
+// ====================================================================================
+const csvFileInput = document.getElementById('csv-file-input');
+const csvSelectBtn = document.getElementById('csv-select-btn');
+const csvTemplateBtn = document.getElementById('csv-template-btn');
+const csvImportBtn = document.getElementById('csv-import-btn');
+const csvStatus = document.getElementById('csv-status');
+
+let selectedCsvFile = null;
+
+csvSelectBtn.addEventListener('click', () => csvFileInput.click());
+
+csvFileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        selectedCsvFile = e.target.files[0];
+        csvStatus.textContent = selectedCsvFile.name + ' seçildi.';
+        csvStatus.style.color = '#333';
+        csvImportBtn.style.display = 'block';
+    }
+});
+
+csvTemplateBtn.addEventListener('click', () => {
+    const csvContent = `ModelKodu_Veya_Barkod;Maliyet;Desi;KDV\nURUN-001;150.50;2;20\n869123456789;85;1;20\n`;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "tonguc_fiyat_sablon.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+});
+
+csvImportBtn.addEventListener('click', () => {
+    if (!selectedCsvFile) return;
+
+    csvImportBtn.textContent = 'Yükleniyor...';
+    csvImportBtn.disabled = true;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split('\n');
+
+        let successCount = 0;
+        let productsToSave = {};
+
+        // Parse CSV (Header'ı atla)
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const cols = line.split(';'); // Noktalı virgül ile ayır
+            if (cols.length >= 3) {
+                const id = cols[0].trim();
+                const maliyet = parseFloat(cols[1].replace(',', '.').trim());
+                const desi = parseFloat(cols[2].replace(',', '.').trim());
+                const kdv = cols[3] ? parseFloat(cols[3].replace(',', '.').trim()) : 20;
+
+                if (id && !isNaN(maliyet) && !isNaN(desi)) {
+                    productsToSave[id] = {
+                        urun_maliyeti: maliyet,
+                        cargo_deci: desi,
+                        kdv_orani: isNaN(kdv) ? 20 : kdv,
+                        kargo_tipi_manual: 'normal' // Varsayılan normal
+                    };
+                    successCount++;
+                }
+            }
+        }
+
+        // LocalDB'ye kaydet
+        chrome.storage.local.get(['tf_products'], (res) => {
+            const db = res.tf_products || {};
+
+            // Yeni verileri eskisinin üstüne ekle/güncelle
+            for (const key in productsToSave) {
+                db[key] = productsToSave[key];
+            }
+
+            chrome.storage.local.set({ tf_products: db }, () => {
+                csvStatus.textContent = successCount + ' ürün başarıyla kaydedildi!';
+                csvStatus.style.color = '#2e7d32';
+                csvImportBtn.textContent = 'İçe Aktar';
+                csvImportBtn.disabled = false;
+                csvImportBtn.style.display = 'none';
+                csvFileInput.value = '';
+                selectedCsvFile = null;
+            });
+        });
+    };
+    reader.readAsText(selectedCsvFile);
+});
