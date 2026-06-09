@@ -525,12 +525,26 @@ async function injectOrderKar() {
         if (!satisFiyati) continue;
 
         // Barkod okuma (Sipariş detaylarında line-item-barcode-value veya shipment-package-barcode olarak bulunabilir)
-        const barcodeEl = row.querySelector('p[data-testid="line-item-barcode-value"]') || row.querySelector('p[data-testid="shipment-package-barcode"]');
-        const barcode = barcodeEl?.textContent?.trim() || '';
+        let modelKodu = '';
+        let barcode = '';
+        const spans = row.querySelectorAll('span');
+        for (let i = 0; i < spans.length; i++) {
+            if (spans[i].textContent.trim() === 'Stok Kodu:' && spans[i].nextElementSibling) {
+                modelKodu = spans[i].nextElementSibling.textContent.trim();
+            }
+            if (spans[i].textContent.trim() === 'Barkod:' && spans[i].nextElementSibling) {
+                barcode = spans[i].nextElementSibling.textContent.trim();
+            }
+        }
 
-        // Model kodu veya barkod ile LocalDB'den veri ara
-        const modelKoduEl = row.querySelector('p[data-testid="line-item-stock-code-value"]') || row.querySelector('p[data-testid="shipment-package-stock-code"]');
-        const modelKodu = modelKoduEl?.textContent?.trim() || '';
+        if (!modelKodu) {
+            const modelKoduEl = row.querySelector('p[data-testid="line-item-stock-code-value"]') || row.querySelector('p[data-testid="shipment-package-stock-code"]');
+            modelKodu = modelKoduEl?.textContent?.trim() || '';
+        }
+        if (!barcode) {
+            const barcodeEl = row.querySelector('p[data-testid="line-item-barcode-value"]') || row.querySelector('p[data-testid="shipment-package-barcode"]');
+            barcode = barcodeEl?.textContent?.trim() || '';
+        }
 
         // Ürün verisini LocalDB'den çek
         const urunData = await LocalDB.getProduct(modelKodu, barcode);
