@@ -584,8 +584,29 @@ async function injectOrderKar() {
             }
         }
 
-        const priceCell = priceEl?.closest('td') || priceContainer;
+                const priceCell = priceEl?.closest('td') || priceContainer;
         if(priceCell) priceCell.appendChild(band);
+
+        // --- Yeni İstek: Fatura Sütununa Cari ID (Sipariş No) Ekleme ---
+        if (!row.querySelector('.tf-cari-id')) {
+            const cells = row.querySelectorAll('td');
+            let faturaCell = null;
+            for (let cell of cells) {
+                if (cell.textContent.includes('Faturalanacak Tutar') || cell.textContent.includes('Fatura Bekleniyor') || cell.textContent.includes('Fatura İşlemleri')) {
+                    faturaCell = cell;
+                    break;
+                }
+            }
+            // Eğer fatura sütununu bulduysak
+            if (faturaCell) {
+                faturaCell.style.position = 'relative';
+                const cariIdContainer = document.createElement('div');
+                cariIdContainer.className = 'tf-cari-id';
+                cariIdContainer.style.cssText = 'position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: bold; color: #f27a1a; background: #fff5eb; padding: 2px 6px; border-radius: 4px; border: 1px solid #ffd8b2; z-index: 10;';
+                cariIdContainer.textContent = 'Cari ID: ' + orderNo;
+                faturaCell.appendChild(cariIdContainer);
+            }
+        }
     }
 }
 
