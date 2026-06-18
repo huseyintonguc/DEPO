@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "TONGUÇ FİYAT",
+  "version": "2.0",
+  "description": "Trendyol ürün ve fiyat düzenleme ekranlarında anlık komisyon, kargo ve net kâr hesaplaması yapar.",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://partner.trendyol.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Kâr Hesapla"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://partner.trendyol.com/*"
+      ],
+      "css": ["styles.css"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
